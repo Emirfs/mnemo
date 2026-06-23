@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="./docs/assets/logo.svg" alt="mnemo logo" width="140" height="140" />
+<img src="./docs/assets/logo.svg" alt="mnemo pixel-art clownfish" width="220" />
 
 # mnemo
 
-### Your AI keeps losing Nemo. mnemo finds him — *every session.*
+### Your AI has goldfish memory. 🐠 mnemo gives it an elephant's. 🐘
 
 **Persistent, portable, cross-AI memory** over a plain markdown vault —
 with **push-based auto-recall** so the model remembers your past work *without being asked.*
@@ -14,49 +14,59 @@ with **push-based auto-recall** so the model remembers your past work *without b
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](#license)
 [![Tests](https://img.shields.io/badge/tests-28%20passing-22c55e.svg)](#status)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-ff8a3d.svg)](#contributing)
-
-*Just keep swimming.* 🐠
+[![Vibe](https://img.shields.io/badge/just%20keep-swimming-1e90ff.svg)](#)
 
 </div>
 
+> [!NOTE]
+> **P. Sherman, 42 Wallaby Way, Sydney.**
+> Dory could *say* the address. She just couldn't *recall* it when it mattered.
+> That's your AI. That's every memory tool that only does storage. mnemo is the one that remembers at the right moment.
+
 ---
 
-## 🌊 The problem
+## 🫧 The problem (you've lived this)
 
-Every new chat, your AI gets amnesia. It forgets the decision you made yesterday,
-the bug you already fixed, the contract two repos share. So you re-explain. Forever.
+```
+You:  "remember we decided X yesterday"
+AI:   "i have no memory of that, what is X"
+You:  *re-explains the entire project for the 9th time*
+```
+
+New chat → instant amnesia. The decision from yesterday? Gone. The bug you already
+killed? It's back, baby. The contract two repos share? Never heard of her.
 
 Most "memory" tools only solve **storage** — they save notes the model never reads back.
-That's like writing Nemo's address on a fridge he can't reach. The real bottleneck is
-**retrieval**: getting the *right* memory into context at the *right* moment.
+Cool, you wrote down Nemo's address on a fridge he can't reach. 🧲 The actual hard part
+is **retrieval**: getting the *right* memory into context at the *right* moment.
 
-> Storage was never the hard part. **Retrieval is.**
+> Storage was never the hard part. **Retrieval is.** 🎯
 
-## 🐠 How mnemo finds Nemo
+## 🐠 How mnemo keeps finding Nemo
 
-mnemo closes the loop with **two currents**:
+Two currents. Same ocean.
 
-- **Push (the rescue).** A `SessionStart` hook injects the relevant notes into context
-  *before you type a word*. The AI starts every session already knowing your past work.
-- **Pull (the net).** An MCP server lets any MCP-capable AI (Claude Code, Cursor, …)
-  search the same vault mid-conversation.
+| | | |
+|---|---|---|
+| **🌊 PUSH — the rescue** | a `SessionStart` hook injects the relevant notes into context *before you type a word* | the AI starts every session already knowing your history |
+| **🪝 PULL — the net** | an MCP server lets any MCP-capable AI search the same vault mid-chat | Claude Code, Cursor, whatever — same brain |
 
-Same vault, two ways in. Nemo never stays lost.
+Nemo never stays lost. *He just keeps swimming back.*
 
-## ✨ Why it's different
+## ✨ Why it actually slaps
 
-- **Vault = source of truth.** Plain markdown + YAML frontmatter. Edit it in Obsidian,
-  in your editor, by hand. The index (SQLite FTS5 + vectors) is *derived* and rebuildable —
-  never committed.
-- **Map, then expand.** Search returns *summaries + paths*, not full bodies. Token cost
-  stays **flat** as your vault grows from 10 notes to 10,000.
-- **Store only what can't be re-derived.** File trees and function signatures? The AI can
-  find those. Decisions, gotchas, contracts, intent? Those get saved.
-- **Hybrid search.** Keyword (FTS5) + semantic (local embeddings, RRF-fused) — catches
-  paraphrases that keyword search misses. Embeddings run **locally**: offline, private, no API.
-- **Portable.** Your vault is a private git repo. New machine, new AI:
-  `mnemo clone <url>` → reindex → it knows everything.
-- **Shared across repos.** Drop a `.mnemo-project` marker so multiple repos feed one project memory.
+- **🗂️ Vault = source of truth.** Plain markdown + YAML frontmatter. Edit it in Obsidian,
+  your editor, or a cave with a stick. The index (SQLite FTS5 + vectors) is *derived* and
+  rebuildable — never committed.
+- **🧮 Map, then expand.** Search returns *summaries + paths*, not full bodies. Token cost
+  stays **flat** whether your vault has 10 notes or 10,000. Your context window stays unbothered.
+- **🧠 Store only what can't be re-derived.** File trees and function signatures? The AI can
+  find those itself. Decisions, gotchas, contracts, *why-the-hell-did-we-do-it-this-way*? Saved.
+- **🔍 Hybrid search.** Keyword (FTS5) **+** semantic (local embeddings, RRF-fused) — catches
+  the paraphrase keyword search fumbles. Runs **100% local**: offline, private, zero API spend.
+- **🚚 Portable AF.** Your vault is a private git repo. New machine, new AI?
+  `mnemo clone <url>` → reindex → it knows everything. Memory that survives a laptop death.
+- **🔗 Shared across repos.** Drop a `.mnemo-project` marker and many repos feed one project brain.
 
 ## 🚀 Quick start
 
@@ -75,8 +85,8 @@ uv run mnemo --vault ./my-vault daily "what I shipped today"
 
 ## 🪝 Auto-recall in 30 seconds
 
-Wire the `SessionStart` hook (see [`hooks/`](./hooks)) and your AI greets you with the
-relevant Map of Content + recent decisions — automatically:
+Wire the `SessionStart` hook and your AI greets you with the relevant Map of Content +
+recent decisions — *automatically, every time.*
 
 ```jsonc
 // .claude/settings.json  (full example: hooks/settings.example.json)
@@ -118,7 +128,7 @@ uv run mnemo --vault ./my-vault serve   # exposes memory_search / get / moc / wr
           └────────────────┘    └─────────────────────┘
 ```
 
-A task = **1 MOC + a few atomic notes**, no matter how big the vault gets.
+A task = **1 MOC + a few atomic notes**, no matter how big the vault gets. Flat tokens. 📉
 
 ## 📓 A note looks like this
 
@@ -138,7 +148,7 @@ bootloader at once, so the system stays alive...
 ```
 
 `summary` is required and short — the index shows *that*, not the body. That's where the
-token discipline comes from.
+token discipline comes from. (No `summary` = bad note. The fish judges you. 🐠)
 
 ## 🛠️ Commands
 
@@ -154,7 +164,7 @@ token discipline comes from.
 
 ## 📊 Status
 
-Working. **F1–F6 implemented, 28 tests passing.** See [`DESIGN.md`](./DESIGN.md) for
+Working. **F1–F6 shipped, 28 tests green.** ✅ See [`DESIGN.md`](./DESIGN.md) for
 architecture and roadmap.
 
 - **F1** — core: markdown/frontmatter parse, FTS5, incremental index
@@ -168,13 +178,15 @@ architecture and roadmap.
 
 Two repos, never mixed: the **public** one is this software (generic, zero personal data);
 your **private** one is your vault. Embeddings run locally, so your notes never leave your
-machine (API embeddings are opt-in only).
+machine. 🏠 (API embeddings are opt-in only.)
 
 ## 🤝 Contributing
 
-PRs and issues welcome. The codebase is small Python — `core library + two frontends`.
-Run the suite with `pytest`, keep notes atomic, and *just keep swimming.*
+PRs and issues welcome. Small Python codebase — `core library + two frontends`.
+Run the suite with `pytest`, keep notes atomic, and *just keep swimming.* 🐠
 
 ## License
 
 [MIT](#license) © Emir Furkan Sarı
+
+<div align="center"><sub><i>mnemo /ˈniːmoʊ/ — from Mnemosyne (memory) ⋅ also a small orange fish who refuses to be forgotten.</i></sub></div>
