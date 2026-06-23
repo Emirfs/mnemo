@@ -58,6 +58,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sw.add_argument("--tags", default="", help="comma-separated")
     sw.add_argument("--links", default="", help="comma-separated ids")
     sw.add_argument("--id")
+
+    sub.add_parser("serve", help="run the MCP server over stdio (cross-AI, pull)")
     return p
 
 
@@ -114,6 +116,12 @@ def _force_utf8() -> None:
 def main(argv: list[str] | None = None) -> int:
     _force_utf8()
     args = _build_parser().parse_args(argv)
+
+    if args.cmd == "serve":
+        from .server import run as serve
+        serve(args.vault)
+        return 0
+
     cfg = Config(args.vault)
     idx = Index(cfg.index_path)
     try:
