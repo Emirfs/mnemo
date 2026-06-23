@@ -15,3 +15,5 @@ venv/
 
 # embedding model cache
 .cache/
+
+.playwright-mcp/
