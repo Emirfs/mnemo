@@ -18,6 +18,10 @@ with **push-based auto-recall** so the model remembers your past work *without b
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-ff8a3d.svg)](#contributing)
 [![Vibe](https://img.shields.io/badge/just%20keep-swimming-1e90ff.svg)](#)
 
+<br/>
+
+<img src="https://raw.githubusercontent.com/Emirfs/mnemo/master/docs/assets/demo.svg" alt="mnemo demo — capture a decision, then a new session auto-recalls it without being asked" width="680" />
+
 </div>
 
 > [!NOTE]
