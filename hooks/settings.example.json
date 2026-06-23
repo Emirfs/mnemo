@@ -1,0 +1,17 @@
+{
+  "//": "Copy this SessionStart hook into your Claude Code settings.json (project .claude/settings.json or ~/.claude/settings.json). It injects the relevant mnemo recall block at session start — the PUSH side of memory. Replace the vault path. 'mnemo' must be on PATH (e.g. `uv tool install mnemo`).",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mnemo --vault \"C:/Users/you/my-memory\" recall --hook --reindex --project-dir \"$CLAUDE_PROJECT_DIR\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

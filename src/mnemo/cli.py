@@ -1,14 +1,26 @@
-"""Minimal CLI front-end (F1). Hook/recall commands arrive in F2."""
+"""mnemo CLI.
+
+F1: reindex / search / get
+F2: recall (push, for the SessionStart hook) / write (with dedup)
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from .config import Config
 from .index import Index
+from .recall import build_recall
 from .search import Search
+from .vault import detect_project
+from .writer import write_note
+
+
+def _csv(value: str) -> list[str]:
+    return [v.strip() for v in (value or "").split(",") if v.strip()]
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -30,17 +42,83 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sg = sub.add_parser("get", help="print a full note by id")
     sg.add_argument("id")
+
+    sr = sub.add_parser("recall", help="build the session-start recall block")
+    sr.add_argument("--project", help="override project (else detected)")
+    sr.add_argument("--project-dir", help="dir to detect project from (default: cwd)")
+    sr.add_argument("--hook", action="store_true", help="emit SessionStart JSON")
+    sr.add_argument("--reindex", action="store_true", help="refresh index first")
+
+    sw = sub.add_parser("write", help="add or update a note (deduped)")
+    sw.add_argument("--type", required=True)
+    sw.add_argument("--title", required=True)
+    sw.add_argument("--summary", default="")
+    sw.add_argument("--body", help="body text; '-' or omitted reads stdin")
+    sw.add_argument("--project")
+    sw.add_argument("--tags", default="", help="comma-separated")
+    sw.add_argument("--links", default="", help="comma-separated ids")
+    sw.add_argument("--id")
     return p
 
 
+def _cmd_recall(args, cfg, idx) -> None:
+    if args.reindex:
+        idx.reindex(cfg.vault)
+    project = args.project or detect_project(args.project_dir or os.getcwd())
+    block = build_recall(idx, project)
+    if args.hook:
+        if block:
+            print(
+                json.dumps(
+                    {
+                        "hookSpecificOutput": {
+                            "hookEventName": "SessionStart",
+                            "additionalContext": block,
+                        }
+                    },
+                    ensure_ascii=False,
+                )
+            )
+    else:
+        print(block)
+
+
+def _cmd_write(args, cfg, idx) -> None:
+    body = args.body
+    if body in (None, "-"):
+        body = "" if sys.stdin.isatty() else sys.stdin.read()
+    result = write_note(
+        cfg,
+        idx,
+        type=args.type,
+        title=args.title,
+        summary=args.summary,
+        body=body,
+        project=args.project,
+        tags=_csv(args.tags),
+        links=_csv(args.links),
+        id=args.id,
+    )
+    print(json.dumps(result, ensure_ascii=False))
+
+
+def _force_utf8() -> None:
+    # Hooks and non-ASCII (Turkish) notes must not crash on Windows cp1252.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8()
     args = _build_parser().parse_args(argv)
     cfg = Config(args.vault)
     idx = Index(cfg.index_path)
     try:
         if args.cmd == "reindex":
-            stats = idx.reindex(cfg.vault, full=args.full)
-            print(json.dumps(stats))
+            print(json.dumps(idx.reindex(cfg.vault, full=args.full)))
         elif args.cmd == "search":
             res = Search(idx).search(
                 args.query, type=args.type, project=args.project, k=args.k
@@ -59,6 +137,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "get":
             note = Search(idx).get(args.id)
             print(json.dumps(note, ensure_ascii=False, indent=2) if note else "not found")
+        elif args.cmd == "recall":
+            _cmd_recall(args, cfg, idx)
+        elif args.cmd == "write":
+            _cmd_write(args, cfg, idx)
     finally:
         idx.close()
     return 0
