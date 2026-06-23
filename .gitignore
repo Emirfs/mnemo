@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+dist/
+build/
+.venv/
+venv/
+
+# mnemo derived index (rebuildable — never commit)
+.mnemo/
+*.sqlite
+*.sqlite-*
+
+# embedding model cache
+.cache/
