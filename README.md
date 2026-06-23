@@ -9,6 +9,8 @@
 **Persistent, portable, cross-AI memory** over a plain markdown vault —
 with **push-based auto-recall** so the model remembers your past work *without being asked.*
 
+[![PyPI](https://img.shields.io/pypi/v/mnemofish?color=ff8a3d&logo=pypi&logoColor=white)](https://pypi.org/project/mnemofish/)
+[![Downloads](https://img.shields.io/pypi/dm/mnemofish?color=1e90ff)](https://pypi.org/project/mnemofish/)
 [![Python](https://img.shields.io/badge/python-3.10+-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-7c3aed)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](#license)
