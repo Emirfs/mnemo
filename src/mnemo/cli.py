@@ -66,6 +66,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sw.add_argument("--links", default="", help="comma-separated ids")
     sw.add_argument("--id")
 
+    sd = sub.add_parser("daily", help="append an entry to today's daily note")
+    sd.add_argument("text", nargs="?", help="entry text; omitted/'-' reads stdin")
+
     sub.add_parser("serve", help="run the MCP server over stdio (cross-AI, pull)")
 
     si = sub.add_parser("init", help="scaffold the vault as a git repo")
@@ -167,7 +170,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     cfg = Config(args.vault)
-    idx = Index(cfg.index_path)
+    # Semantic (embedding) index for search/reindex/write; FTS-only fast path
+    # for recall/daily/get so the SessionStart hook never loads the model.
+    emb = None
+    if args.cmd in ("reindex", "search", "write"):
+        from .embed import Embedder
+        if Embedder.is_available():
+            emb = Embedder()
+    idx = Index(cfg.index_path, embedder=emb)
     try:
         if args.cmd == "reindex":
             print(json.dumps(idx.reindex(cfg.vault, full=args.full)))
@@ -193,6 +203,12 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_recall(args, cfg, idx)
         elif args.cmd == "write":
             _cmd_write(args, cfg, idx)
+        elif args.cmd == "daily":
+            from .daily import append_daily
+            text = args.text
+            if text in (None, "-"):
+                text = "" if sys.stdin.isatty() else sys.stdin.read().strip()
+            print(json.dumps(append_daily(cfg, idx, text), ensure_ascii=False))
     finally:
         idx.close()
     return 0

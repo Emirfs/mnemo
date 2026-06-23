@@ -8,12 +8,20 @@ Semantic (embedding) dedup lands in F5.
 from __future__ import annotations
 
 import datetime as _dt
+import math
 from pathlib import Path
 
 import frontmatter
 
 from .note import slugify
 from .search import Search
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
 
 _FOLDER = {
     "decision": "projects",
@@ -62,6 +70,21 @@ def write_note(
         if _norm_title(r["title"]) == _norm_title(title):
             existing = r
             break
+
+    # semantic dedup: near-identical *content* (summary+body) of the same
+    # type/project, regardless of title. High cosine threshold avoids false
+    # merges (paraphrases of distinct ideas are NOT merged).
+    if existing is None and getattr(index, "vectors", False):
+        emb = index.embedder
+        new_vec = emb.encode_one(f"{summary}\n{body}".strip() or title)
+        for nid, _dist in index.vec_search(f"{title} {summary} {body}", 5) or []:
+            cand = Search(index).get(nid)
+            if not cand or cand["type"] != type or cand["project"] != project:
+                continue
+            cand_vec = emb.encode_one(f"{cand['summary']}\n{cand['body']}".strip() or cand["title"])
+            if _cosine(new_vec, cand_vec) >= 0.95:
+                existing = {"path": cand["path"], "title": cand["title"]}
+                break
 
     if existing:
         path = vault / existing["path"]

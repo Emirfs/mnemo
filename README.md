@@ -20,17 +20,39 @@ Persistent, portable, cross-AI memory over a plain **markdown vault** — with
 
 ## Status
 
-Early development. See [`DESIGN.md`](./DESIGN.md) for the full architecture and
-roadmap. F1 (core: parse + FTS5 + incremental index) is implemented.
+Working. F1–F5 implemented (24 tests passing). See [`DESIGN.md`](./DESIGN.md)
+for architecture and roadmap.
+
+- **F1** core: markdown/frontmatter parse, FTS5, incremental index
+- **F2** `recall` + `write` + SessionStart hook (push auto-recall) — [`hooks/`](./hooks)
+- **F3** MCP server (`memory_search/get/moc/write`) — [`docs/mcp.md`](./docs/mcp.md)
+- **F4** portability: `init` / `sync` / `clone` / `export` / `import`
+- **F5** semantic hybrid search (fastembed + sqlite-vec, RRF), content dedup,
+  `daily` journaling
 
 ## Quick start (dev)
 
 ```bash
 uv venv
-uv pip install -e ".[dev]"
-uv run mnemo --vault ./my-vault reindex
+uv pip install -e ".[dev]"            # core (FTS5 only)
+uv pip install -e ".[dev,embed,mcp]"  # + semantic search + MCP server
+
+uv run mnemo --vault ./my-vault init
+uv run mnemo --vault ./my-vault write --type decision --title "..." --summary "..."
 uv run mnemo --vault ./my-vault search "your query"
+uv run mnemo --vault ./my-vault daily "what I did today"
 ```
+
+## Commands
+
+| Command | What |
+|---------|------|
+| `init` / `sync` / `clone` | manage the vault as a private git repo |
+| `write` / `daily` | add notes (deduped) / journal entries |
+| `search` / `get` | hybrid search (summaries) / fetch a full note |
+| `recall --hook` | emit the SessionStart recall block (push) |
+| `serve` | run the MCP server (pull, cross-AI) |
+| `export` / `import` | zip the vault for one-shot transfer |
 
 ## License
 

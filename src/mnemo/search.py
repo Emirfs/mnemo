@@ -1,28 +1,29 @@
 """Search over the index.
 
-Returns *summaries + paths*, never full bodies — this is the token-discipline
-contract ("map then expand"). Callers fetch a full note with ``get`` only when
-they actually need it.
+Hybrid when a vector store is present (FTS5 + semantic, fused with Reciprocal
+Rank Fusion); FTS-only otherwise. Returns *summaries + paths*, never full
+bodies — the token-discipline contract. Fetch a body with ``get`` on demand.
 """
 
 from __future__ import annotations
 
 import json
-import re
 
-_WORD_RE = re.compile(r"\w+", re.UNICODE)
+_RRF_K = 60
 
 
-def _fts_query(text: str) -> str:
-    """Build a safe FTS5 query: prefix-matched terms joined by OR."""
-    terms = _WORD_RE.findall(text)
-    if not terms:
-        return '""'
-    return " OR ".join(f'"{t}"*' for t in terms)
+def _rrf(ranked_lists: list[list[str]], k0: int = _RRF_K) -> list[tuple[str, float]]:
+    """Reciprocal Rank Fusion across one or more ranked id lists."""
+    scores: dict[str, float] = {}
+    for ids in ranked_lists:
+        for rank, nid in enumerate(ids):
+            scores[nid] = scores.get(nid, 0.0) + 1.0 / (k0 + rank + 1)
+    return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
 
 
 class Search:
     def __init__(self, index):
+        self.index = index
         self.con = index.con
 
     def search(
@@ -33,23 +34,19 @@ class Search:
         tags: list[str] | None = None,
         k: int = 5,
     ) -> list[dict]:
-        match = _fts_query(query)
-        # Over-fetch, then apply metadata filters and trim to k.
-        rows = self.con.execute(
-            """SELECT id, bm25(notes_fts) AS rank
-               FROM notes_fts
-               WHERE notes_fts MATCH ?
-               ORDER BY rank
-               LIMIT ?""",
-            (match, max(k * 4, k)),
-        ).fetchall()
+        pool = max(k * 4, 10)
+        lists = [self.index.fts_ids(query, pool)]
+        vec = self.index.vec_ids(query, pool)
+        if vec is not None:
+            lists.append(vec)
+        fused = _rrf(lists)
 
         results: list[dict] = []
-        for r in rows:
+        for nid, score in fused:
             n = self.con.execute(
                 "SELECT id, type, project, title, summary, path, tags "
                 "FROM notes WHERE id = ?",
-                (r["id"],),
+                (nid,),
             ).fetchone()
             if n is None:
                 continue
@@ -69,7 +66,7 @@ class Search:
                     "summary": n["summary"],
                     "path": n["path"],
                     "tags": ntags,
-                    "score": round(-r["rank"], 4),  # higher = better
+                    "score": round(score, 5),
                 }
             )
             if len(results) >= k:

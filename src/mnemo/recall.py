@@ -63,4 +63,9 @@ def build_recall(index, project: str | None, max_items: int = 8) -> str:
         out.append("\n### Lessons / past mistakes")
         out.extend(f"- [{r['id']}] {r['title']} — {r['summary']}" for r in lessons)
 
+    out.append(
+        "\n> When you make a notable decision or hit a lesson this session, "
+        "record it with `memory_write` (MCP) or `mnemo write` so future "
+        "sessions inherit it."
+    )
     return "\n".join(out).strip()

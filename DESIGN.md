@@ -261,15 +261,19 @@ Auto-recall'ı mümkün kılan kısım. `settings.json` hook'ları:
 
 ## 17. İnşa Yol Haritası (bağımlılık sırası — hepsi tam sürümde)
 
-| Faz | Çıktı | Kanıt |
-|---|---|---|
-| **F1 — Çekirdek** | parse + frontmatter + FTS5 + embedding + incremental index | `search` doğru notu döndürür |
-| **F2 — CLI + Hook** | `recall/search/write` + Claude SessionStart hook (push) | AI sormadan geçmişi bilerek başlar |
-| **F3 — MCP** | `memory_search/get/moc/write/link` server | Cursor/Claude aynı vault'ta arar |
-| **F4 — Taşıma** | `init/sync/clone/export/import` (GitHub) | yeni makinede klonla+reindex çalışır |
-| **F5 — Auto-capture + dedup** | Stop hook → write, `compact` | vault kendini büyütür, çürümez |
+| Faz | Çıktı | Kanıt | Durum |
+|---|---|---|---|
+| **F1 — Çekirdek** | parse + frontmatter + FTS5 + incremental index | `search` doğru notu döndürür | ✅ |
+| **F2 — CLI + Hook** | `recall/search/write` + Claude SessionStart hook (push) | AI sormadan geçmişi bilerek başlar | ✅ |
+| **F3 — MCP** | `memory_search/get/moc/write` server | Cursor/Claude aynı vault'ta arar | ✅ |
+| **F4 — Taşıma** | `init/sync/clone/export/import` (GitHub) | yeni makinede klonla+reindex çalışır | ✅ |
+| **F5 — Semantic + daily** | fastembed+sqlite-vec hybrid (RRF), içerik dedup, `daily` journaling | paraphrase araması FTS'in kaçırdığını bulur | ✅ |
 
-F2 sonunda **okuma döngüsü kapanır** → claude-mem'i geçer. Pilot: bu STM32 sistemi (elimizde gerçek içerik var).
+F2 sonunda **okuma döngüsü kapandı** → claude-mem'i geçer. 24 test geçiyor.
+
+**Embedding backend kararı (çözüldü):** fastembed (ONNX) + `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (384-dim, çok-dilli, Türkçe). torch yok → hafif/hızlı cold-start. SessionStart hook (`recall`) embedding YÜKLEMEZ (sadece SQL) → hızlı kalır; model yalnız `search/serve/write/reindex`'te lazy yüklenir.
+
+**Sonraki (F5+ / opsiyonel):** transcript'ten otomatik yakalama (rot riski yüksek — bilerek ertelendi; şimdilik recall footer modeli `memory_write`'a yönlendiriyor), `compact` (dedup/ölü-link temizliği), MOC yarı-otomatik üretimi.
 
 ---
 

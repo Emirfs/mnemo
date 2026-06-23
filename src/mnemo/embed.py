@@ -1,42 +1,50 @@
-"""Optional semantic embedding layer (pluggable, lazy-loaded).
+"""Optional semantic embedding layer (pluggable, lazy).
 
-Default model is multilingual (notes may be Turkish). Heavy ML deps live behind
-the ``embed`` extra; the rest of mnemo works on FTS5 alone if they are absent.
-
-This module is wired but not yet used by the index in F1 — semantic search
-(vector store via sqlite-vec) lands in F2/F4. Kept here so the interface is
-fixed and importable without pulling torch.
+Backend: fastembed (ONNX) — fast cold-start, light install, friendly to
+`uv tool install`. Default model is multilingual (notes may be Turkish).
+Everything degrades to FTS5 when the ``embed`` extra is absent.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-# Multilingual MiniLM: fast + stable, handles Turkish notes.
+# Multilingual MiniLM: fast + stable, handles Turkish. 384-dim.
 DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+DEFAULT_DIM = 384
 
 
 class Embedder:
-    def __init__(self, model_name: str = DEFAULT_MODEL):
+    def __init__(self, model_name: str = DEFAULT_MODEL, dim: int = DEFAULT_DIM):
         self.model_name = model_name
+        self.dim = dim
         self._model = None
 
     @staticmethod
     def is_available() -> bool:
         try:
-            import sentence_transformers  # noqa: F401
+            import fastembed  # noqa: F401
+            import sqlite_vec  # noqa: F401
         except Exception:
             return False
         return True
 
     def _ensure(self):
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
+            import warnings
 
-            self._model = SentenceTransformer(self.model_name)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                from fastembed import TextEmbedding
+
+                self._model = TextEmbedding(self.model_name)
         return self._model
 
-    def encode(self, texts: Sequence[str]):
-        """Return L2-normalized embeddings for a batch of texts."""
+    def encode_one(self, text: str) -> list[float]:
         model = self._ensure()
-        return model.encode(list(texts), normalize_embeddings=True)
+        vec = next(iter(model.embed([text])))
+        return [float(x) for x in vec]
+
+    def encode(self, texts: Sequence[str]) -> list[list[float]]:
+        model = self._ensure()
+        return [[float(x) for x in v] for v in model.embed(list(texts))]

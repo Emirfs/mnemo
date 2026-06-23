@@ -22,8 +22,11 @@ def build_server(vault: str | None = None):
     cfg = Config(vault)
     server = FastMCP("mnemo")
 
+    from .embed import Embedder
+    _embedder = Embedder() if Embedder.is_available() else None
+
     def _open() -> Index:
-        idx = Index(cfg.index_path)
+        idx = Index(cfg.index_path, embedder=_embedder)
         idx.reindex(cfg.vault)  # incremental: pick up vault edits / git pulls
         return idx
 
