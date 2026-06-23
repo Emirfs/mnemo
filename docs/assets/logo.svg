@@ -1,0 +1,45 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="mnemo — the clownfish that never forgets">
+  <defs>
+    <radialGradient id="sea" cx="50%" cy="35%" r="75%">
+      <stop offset="0%" stop-color="#1e6fd9"/>
+      <stop offset="100%" stop-color="#0a2a5e"/>
+    </radialGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ff8a3d"/>
+      <stop offset="100%" stop-color="#f4631e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- deep sea -->
+  <circle cx="100" cy="100" r="96" fill="url(#sea)"/>
+  <circle cx="100" cy="100" r="96" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="2"/>
+
+  <!-- bubbles (lost memories, floating up) -->
+  <circle cx="150" cy="58" r="6" fill="#ffffff" fill-opacity="0.45"/>
+  <circle cx="162" cy="40" r="3.5" fill="#ffffff" fill-opacity="0.35"/>
+  <circle cx="168" cy="74" r="2.5" fill="#ffffff" fill-opacity="0.3"/>
+
+  <!-- clownfish -->
+  <g transform="translate(2,6)">
+    <!-- tail -->
+    <path d="M58 100 L34 80 Q40 100 34 120 Z" fill="url(#body)"/>
+    <!-- body -->
+    <ellipse cx="104" cy="100" rx="50" ry="34" fill="url(#body)"/>
+    <!-- top fin -->
+    <path d="M92 68 Q104 50 124 64 Q112 70 104 72 Z" fill="#f4631e"/>
+    <!-- bottom fin -->
+    <path d="M92 132 Q104 150 124 136 Q112 130 104 128 Z" fill="#f4631e"/>
+
+    <!-- white stripes -->
+    <path d="M78 72 Q70 100 78 128 Q90 122 90 100 Q90 78 78 72 Z" fill="#ffffff"/>
+    <path d="M118 70 Q112 100 118 130 Q132 124 134 100 Q132 76 118 70 Z" fill="#ffffff"/>
+    <!-- stripe outlines -->
+    <path d="M78 72 Q70 100 78 128" stroke="#11223b" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M118 70 Q112 100 118 130" stroke="#11223b" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+    <!-- eye -->
+    <circle cx="138" cy="92" r="9" fill="#ffffff"/>
+    <circle cx="140" cy="92" r="4.5" fill="#11223b"/>
+    <circle cx="142" cy="90" r="1.6" fill="#ffffff"/>
+  </g>
+</svg>
