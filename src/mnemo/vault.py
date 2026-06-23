@@ -19,12 +19,36 @@ def iter_note_files(vault: Path) -> Iterator[Path]:
         yield p
 
 
+MARKER = ".mnemo-project"
+
+
+def _read_marker(start: Path) -> str | None:
+    """Walk up from `start` looking for a `.mnemo-project` file; its first
+    non-empty line is the project name. Stops at the git root."""
+    cur = Path(start).resolve()
+    while True:
+        f = cur / MARKER
+        if f.is_file():
+            for line in f.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    return line.strip()
+            return None
+        if (cur / ".git").exists() or cur.parent == cur:
+            return None
+        cur = cur.parent
+
+
 def detect_project(start: str | Path) -> str | None:
     """Identify the project for a working directory.
 
-    Order: git ``origin`` remote slug → folder name fallback.
+    Order: ``.mnemo-project`` marker → git ``origin`` remote slug → folder name.
+    The marker lets several repos (different git remotes) share one logical
+    project, so their memory is pooled.
     """
     start = Path(start)
+    marker = _read_marker(start)
+    if marker:
+        return marker
     try:
         out = subprocess.run(
             ["git", "-C", str(start), "remote", "get-url", "origin"],

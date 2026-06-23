@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 from .config import Config
 from .index import Index
@@ -86,6 +87,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sm = sub.add_parser("import", help="unzip an archive into the vault, then reindex")
     sm.add_argument("archive", help="input .zip path")
+
+    spj = sub.add_parser(
+        "project",
+        help="show the detected project, or write a .mnemo-project marker",
+    )
+    spj.add_argument("name", nargs="?", help="set this project name in the current dir")
+    spj.add_argument("--dir", default=".", help="directory (default: cwd)")
     return p
 
 
@@ -146,6 +154,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "serve":
         from .server import run as serve
         serve(args.vault)
+        return 0
+
+    if args.cmd == "project":
+        from .vault import MARKER, detect_project
+        target = Path(args.dir)
+        if args.name:
+            (target / MARKER).write_text(args.name + "\n", encoding="utf-8")
+            print(json.dumps({"marker": str(target / MARKER), "project": args.name}))
+        else:
+            print(json.dumps({"project": detect_project(target)}))
         return 0
 
     if args.cmd in ("init", "sync", "clone", "export", "import"):
