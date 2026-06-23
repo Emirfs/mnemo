@@ -1,6 +1,6 @@
 """mnemo — persistent, portable, cross-AI memory over a markdown vault."""
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from .config import Config
 from .index import Index

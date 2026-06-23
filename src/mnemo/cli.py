@@ -139,8 +139,9 @@ def _cmd_write(args, cfg, idx) -> None:
 
 
 def _force_utf8() -> None:
-    # Hooks and non-ASCII (Turkish) notes must not crash on Windows cp1252.
-    for stream in (sys.stdout, sys.stderr):
+    # Hooks, piped note bodies, and non-ASCII (Turkish) text must not crash or
+    # mojibake on Windows cp1252. stdin matters for `write`/`daily --body -`.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8")
         except (AttributeError, ValueError):

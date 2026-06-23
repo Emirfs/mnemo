@@ -734,8 +734,8 @@ wheels = [
 ]
 
 [[package]]
-name = "mnemo"
-version = "0.1.0"
+name = "mnemofish"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "python-frontmatter" },
