@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./docs/assets/logo.svg" alt="mnemo pixel-art clownfish" width="220" />
+<img src="https://raw.githubusercontent.com/Emirfs/mnemo/master/docs/assets/logo.svg" alt="mnemo pixel-art clownfish" width="220" />
 
 # mnemo
 
@@ -71,10 +71,27 @@ Nemo never stays lost. *He just keeps swimming back.*
 ## 🚀 Quick start
 
 ```bash
+# zero-install run (recommended)
+uvx mnemovault --vault ./my-vault init
+
+# or install it (ships the `mnemo` command)
+pip install "mnemovault[embed,mcp]"   # everything: semantic search + MCP server
+pip install mnemovault                 # core only (FTS5 keyword search)
+```
+
+> 📦 PyPI package is **`mnemovault`**; the CLI command is **`mnemo`** (the alias `mnemovault` also works).
+
+<details>
+<summary>From source (dev)</summary>
+
+```bash
 uv venv
 uv pip install -e ".[dev]"            # core (FTS5 keyword search)
 uv pip install -e ".[dev,embed,mcp]"  # + semantic search + MCP server
+```
+</details>
 
+```bash
 uv run mnemo --vault ./my-vault init
 uv run mnemo --vault ./my-vault write \
   --type decision --title "RF update is sequential" \

@@ -1,15 +1,34 @@
 [project]
-name = "mnemo"
+name = "mnemovault"
 version = "0.2.0"
 description = "Persistent, portable, cross-AI memory over a markdown vault — with push-based auto-recall (MCP + CLI)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Emir Furkan Sarı" }]
-keywords = ["memory", "mcp", "obsidian", "rag", "llm", "ai", "persistent-memory"]
+keywords = ["memory", "mcp", "model-context-protocol", "obsidian", "rag", "llm", "ai", "persistent-memory", "claude", "claude-code", "auto-recall"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Indexing",
+]
 dependencies = [
     "python-frontmatter>=1.1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Emirfs/mnemo"
+Repository = "https://github.com/Emirfs/mnemo"
+Issues = "https://github.com/Emirfs/mnemo/issues"
 
 [project.optional-dependencies]
 embed = [
@@ -25,6 +44,7 @@ dev = [
 
 [project.scripts]
 mnemo = "mnemo.cli:main"
+mnemovault = "mnemo.cli:main"
 
 [build-system]
 requires = ["hatchling"]
