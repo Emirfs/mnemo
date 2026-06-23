@@ -72,14 +72,14 @@ Nemo never stays lost. *He just keeps swimming back.*
 
 ```bash
 # zero-install run (recommended)
-uvx mnemovault --vault ./my-vault init
+uvx mnemofish --vault ./my-vault init
 
 # or install it (ships the `mnemo` command)
-pip install "mnemovault[embed,mcp]"   # everything: semantic search + MCP server
-pip install mnemovault                 # core only (FTS5 keyword search)
+pip install "mnemofish[embed,mcp]"    # everything: semantic search + MCP server
+pip install mnemofish                  # core only (FTS5 keyword search)
 ```
 
-> 📦 PyPI package is **`mnemovault`**; the CLI command is **`mnemo`** (the alias `mnemovault` also works).
+> 📦 PyPI package is **`mnemofish`**; the CLI command is **`mnemo`** (the alias `mnemofish` also works).
 
 <details>
 <summary>From source (dev)</summary>

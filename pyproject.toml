@@ -1,5 +1,5 @@
 [project]
-name = "mnemovault"
+name = "mnemofish"
 version = "0.2.0"
 description = "Persistent, portable, cross-AI memory over a markdown vault — with push-based auto-recall (MCP + CLI)."
 readme = "README.md"
@@ -44,7 +44,7 @@ dev = [
 
 [project.scripts]
 mnemo = "mnemo.cli:main"
-mnemovault = "mnemo.cli:main"
+mnemofish = "mnemo.cli:main"
 
 [build-system]
 requires = ["hatchling"]
