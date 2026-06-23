@@ -23,6 +23,13 @@ def _csv(value: str) -> list[str]:
     return [v.strip() for v in (value or "").split(",") if v.strip()]
 
 
+def _dest_from_url(url: str) -> str:
+    name = url.rstrip("/").split("/")[-1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    return name or "vault"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="mnemo", description="Persistent memory over a markdown vault"
@@ -60,6 +67,22 @@ def _build_parser() -> argparse.ArgumentParser:
     sw.add_argument("--id")
 
     sub.add_parser("serve", help="run the MCP server over stdio (cross-AI, pull)")
+
+    si = sub.add_parser("init", help="scaffold the vault as a git repo")
+    si.add_argument("--remote", help="git remote URL (use a PRIVATE repo)")
+
+    sy = sub.add_parser("sync", help="commit + pull --rebase + push the vault")
+    sy.add_argument("--message", "-m")
+
+    sc = sub.add_parser("clone", help="clone a vault on a new machine, then reindex")
+    sc.add_argument("url")
+    sc.add_argument("dest", nargs="?", help="destination dir (default: repo name)")
+
+    se = sub.add_parser("export", help="zip the vault markdown (for Drive/transfer)")
+    se.add_argument("out", help="output .zip path")
+
+    sm = sub.add_parser("import", help="unzip an archive into the vault, then reindex")
+    sm.add_argument("archive", help="input .zip path")
     return p
 
 
@@ -120,6 +143,27 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "serve":
         from .server import run as serve
         serve(args.vault)
+        return 0
+
+    if args.cmd in ("init", "sync", "clone", "export", "import"):
+        from . import portability as port
+        cfg = Config(args.vault)
+        if args.cmd == "init":
+            if args.remote:
+                print(
+                    "WARNING: use a PRIVATE repo — your notes will be pushed there.",
+                    file=sys.stderr,
+                )
+            print(json.dumps(port.init_vault(cfg.vault, args.remote)))
+        elif args.cmd == "sync":
+            print(json.dumps(port.sync_vault(cfg.vault, args.message)))
+        elif args.cmd == "clone":
+            dest = args.dest or _dest_from_url(args.url)
+            print(json.dumps(port.clone_vault(args.url, dest)))
+        elif args.cmd == "export":
+            print(json.dumps(port.export_vault(cfg.vault, args.out)))
+        elif args.cmd == "import":
+            print(json.dumps(port.import_vault(args.archive, cfg.vault)))
         return 0
 
     cfg = Config(args.vault)
