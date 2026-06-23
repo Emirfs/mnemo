@@ -106,30 +106,88 @@ uv run mnemo --vault ./my-vault search "rf update order"
 uv run mnemo --vault ./my-vault daily "what I shipped today"
 ```
 
-## 🪝 Auto-recall in 30 seconds
+## 🪝 Setup — what you actually need to do
 
-Wire the `SessionStart` hook and your AI greets you with the relevant Map of Content +
-recent decisions — *automatically, every time.*
+Auto-recall isn't magic; it's a 4-step setup. Do it once, then forget about it.
+
+### 1. Install + create your vault
+
+```bash
+pip install "mnemofish[embed,mcp]"          # ships the `mnemo` command
+mnemo --vault "~/my-memory" init            # scaffolds the vault as a git repo
+```
+
+Pick **one** vault path and use it everywhere (e.g. `~/my-memory`). This is your private
+brain — keep it separate from any code repo.
+
+### 2. Wire the `SessionStart` hook (the PUSH side)
+
+Add this to your Claude Code settings (`~/.claude/settings.json` for all projects, or a
+project's `.claude/settings.json`). Full example: [`hooks/settings.example.json`](./hooks).
 
 ```jsonc
-// .claude/settings.json  (full example: hooks/settings.example.json)
 {
   "hooks": {
     "SessionStart": [
       { "matcher": "startup", "hooks": [{
         "type": "command",
-        "command": "mnemo --vault \"/path/to/my-memory\" recall --hook --reindex --project-dir \"$CLAUDE_PROJECT_DIR\""
+        "command": "mnemo --vault \"/ABSOLUTE/path/to/my-memory\" recall --hook --reindex --project-dir \"$CLAUDE_PROJECT_DIR\"",
+        "timeout": 30
       }]}
     ]
   }
 }
 ```
 
-For MCP clients, run the server and point your client at it:
+- Use the **absolute** vault path, and make sure `mnemo` is on your `PATH`
+  (`pip install` / `uv tool install mnemofish` both do this).
+- **Keep `--project-dir "$CLAUDE_PROJECT_DIR"`.** This is how the hook knows which
+  project you opened. Without it, recall guesses from the hook's working directory and
+  often comes back empty.
+
+### 3. Write notes — *per project*
+
+Recall has nothing to inject until you save something. Record decisions, lessons, and
+gotchas as you work (or let the AI do it via the MCP `memory_write` tool):
 
 ```bash
-uv run mnemo --vault ./my-vault serve   # exposes memory_search / get / moc / write
+mnemo --vault "~/my-memory" write \
+  --type decision --project my-app \
+  --title "Auth tokens are short-lived" \
+  --summary "15-min access tokens + refresh; long-lived tokens were a security risk."
 ```
+
+> ⚠️ **The #1 reason recall comes back empty: it's project-scoped.**
+> The hook only injects notes whose `project` matches the repo you opened. mnemo derives
+> the project from the **git remote slug → else the folder name**. So a note saved with
+> `--project my-app` only surfaces when you open the `my-app` repo. Notes for *other*
+> projects stay out of your context (that's the point — no noise).
+>
+> Working across several repos that share one brain? Drop a `.mnemo-project` file in each,
+> containing the shared project name — they'll all recall the same notes.
+
+### 4. Restart the session to see it
+
+The hook fires at **session start**, so close and reopen Claude Code in a project that
+has notes. You'll get a `## 🧠 mnemo recall` block in context before you type a word.
+
+### Cross-AI (the PULL side) — optional
+
+For MCP clients (Claude Code, Cursor, …), run the server and point your client at it.
+Any connected AI can then search the same vault mid-conversation:
+
+```bash
+mnemo --vault "~/my-memory" serve   # exposes memory_search / get / moc / write
+```
+
+### 🩺 Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| **Recall block is empty** | The current repo's project has no notes yet — write some with `--project <name>`, or the detected project name doesn't match. Check with `mnemo --vault <v> recall --project <name>`. |
+| **Nothing happens at session start** | `mnemo` not on `PATH`, wrong/relative vault path, or the hook lacks `--project-dir "$CLAUDE_PROJECT_DIR"`. Test the exact command in a terminal first. |
+| **`write` / `reindex` hangs** | A stuck mnemo process is holding the SQLite index lock. Kill stray `mnemo`/`python` processes and retry. Don't run two indexing commands at once. |
+| **First `write` is slow** | One-time: semantic embeddings download the local model (~80 MB). Subsequent runs are fast; `recall` never loads the model. |
 
 ## 🧭 How it works
 
