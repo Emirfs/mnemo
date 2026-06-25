@@ -103,6 +103,7 @@ uv run mnemo --vault ./my-vault write \
   --type decision --title "RF update is sequential" \
   --summary "Devices update one at a time, not concurrently — prevents system lockup."
 uv run mnemo --vault ./my-vault search "rf update order"
+uv run mnemo --vault ./my-vault context "continue RF update work" --project stm32-rf-ota
 uv run mnemo --vault ./my-vault daily "what I shipped today"
 ```
 
@@ -171,6 +172,27 @@ mnemo --vault "~/my-memory" write \
 The hook fires at **session start**, so close and reopen Claude Code in a project that
 has notes. You'll get a `## 🧠 mnemo recall` block in context before you type a word.
 
+### Query-time context — broker MVP
+
+Before running a daemon, test whether automatic retrieval is useful with `context`:
+
+```bash
+mnemo --vault "~/my-memory" context "continue RF update work" \
+  --project-dir "C:/path/to/repo" \
+  --budget 2400 \
+  -k 5
+```
+
+`context` returns one compact markdown block: project MOC first, then relevant
+decision/lesson/reference/note summaries. It never returns full note bodies; expand
+one item only when needed:
+
+```bash
+mnemo --vault "~/my-memory" get 20260623-guncelleme-sirali-yapilir
+```
+
+Use `--json` for benchmarks or hook experiments.
+
 ### Cross-AI (the PULL side) — optional
 
 For MCP clients (Claude Code, Cursor, …), run the server and point your client at it.
@@ -216,7 +238,7 @@ A task = **1 MOC + a few atomic notes**, no matter how big the vault gets. Flat 
 ```markdown
 ---
 id: 20260623-rf-uid-sequential
-type: decision           # decision | lesson | daily | project | reference | note
+type: decision           # decision | lesson | daily | project | reference | note | profile
 title: RF update is sequential
 project: stm32-rf-ota
 tags: [rf, protocol, stm32]
@@ -236,8 +258,10 @@ token discipline comes from. (No `summary` = bad note. The fish judges you. 🐠
 | Command | What it does |
 |---|---|
 | `init` / `sync` / `clone` | manage the vault as a private git repo |
-| `write` / `daily` | add notes (deduped) / append journal entries |
+| `write` / `daily` | add notes (deduped; `--supersedes <id>` retires older ones) / append journal entries |
 | `search` / `get` | hybrid search (summaries) / fetch one full note |
+| `context` | compact query-time context pack (recency-weighted, profile-pinned) |
+| `bench` | score retrieval quality (hit-rate / MRR / recall) against a cases file |
 | `reindex` | rebuild the derived index from scratch |
 | `recall --hook` | emit the SessionStart recall block (push) |
 | `serve` | run the MCP server (pull, cross-AI) |

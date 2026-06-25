@@ -11,7 +11,10 @@ _MOC_BODY_LIMIT = 1500
 
 
 def _recent(con, type_: str, project: str | None, limit: int):
-    q = "SELECT id, title, summary FROM notes WHERE type = ?"
+    q = (
+        "SELECT id, title, summary FROM notes "
+        "WHERE type = ? AND COALESCE(status,'active') = 'active'"
+    )
     params: list = [type_]
     if project:
         q += " AND (project = ? OR project IS NULL)"
@@ -26,7 +29,8 @@ def _moc(con, project: str | None):
         return None
     return con.execute(
         "SELECT id, title, summary, body FROM notes "
-        "WHERE type = 'project' AND project = ? LIMIT 1",
+        "WHERE type = 'project' AND project = ? "
+        "AND COALESCE(status,'active') = 'active' LIMIT 1",
         (project,),
     ).fetchone()
 
@@ -34,16 +38,21 @@ def _moc(con, project: str | None):
 def build_recall(index, project: str | None, max_items: int = 8) -> str:
     con = index.con
     moc = _moc(con, project)
+    profiles = _recent(con, "profile", project, max_items)
     decisions = _recent(con, "decision", project, max_items)
     lessons = _recent(con, "lesson", project, max_items)
 
-    if not (moc or decisions or lessons):
+    if not (moc or profiles or decisions or lessons):
         return ""
 
     out: list[str] = [
         f"## 🧠 mnemo recall — project: {project or '(unknown)'}",
         "Past context for this project. Expand any item with `mnemo get <id>`.",
     ]
+
+    if profiles:
+        out.append("\n### Profile / static facts")
+        out.extend(f"- [{r['id']}] {r['title']} — {r['summary']}" for r in profiles)
 
     if moc:
         out.append(f"\n### Map: {moc['title']}")

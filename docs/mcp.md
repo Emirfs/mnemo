@@ -19,7 +19,7 @@ with `memory_get`, keeping token cost flat as the vault grows.
 ## Install (requires the `mcp` extra)
 
 ```bash
-uv tool install "mnemo[mcp]"     # or: pipx install "mnemo[mcp]"
+uv tool install "mnemofish[mcp]"     # or: pipx install "mnemofish[mcp]"
 ```
 
 ## Register with Claude Code

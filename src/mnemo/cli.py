@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from .config import Config
+from .context import build_context
 from .index import Index
 from .recall import build_recall
 from .search import Search
@@ -56,6 +57,20 @@ def _build_parser() -> argparse.ArgumentParser:
     sr.add_argument("--project-dir", help="dir to detect project from (default: cwd)")
     sr.add_argument("--hook", action="store_true", help="emit SessionStart JSON")
     sr.add_argument("--reindex", action="store_true", help="refresh index first")
+    sx = sub.add_parser("context", help="build a compact query context pack")
+    sx.add_argument("query")
+    sx.add_argument("--project", help="override project (else detected)")
+    sx.add_argument("--project-dir", help="dir to detect project from (default: cwd)")
+    sx.add_argument("-k", type=int, default=5)
+    sx.add_argument("--budget", type=int, default=2400)
+    sx.add_argument("--json", action="store_true")
+    sx.add_argument("--reindex", action="store_true", help="refresh index first")
+
+    sb = sub.add_parser("bench", help="evaluate retrieval quality against a cases file")
+    sb.add_argument("cases", help="path to .json/.jsonl: {query, project?, expected:[ids], k?}")
+    sb.add_argument("-k", type=int, default=5)
+    sb.add_argument("--json", action="store_true")
+    sb.add_argument("--reindex", action="store_true", help="refresh index first")
 
     sw = sub.add_parser("write", help="add or update a note (deduped)")
     sw.add_argument("--type", required=True)
@@ -65,6 +80,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sw.add_argument("--project")
     sw.add_argument("--tags", default="", help="comma-separated")
     sw.add_argument("--links", default="", help="comma-separated ids")
+    sw.add_argument(
+        "--supersedes", default="",
+        help="comma-separated ids this note replaces (they're hidden from recall)",
+    )
     sw.add_argument("--id")
 
     sd = sub.add_parser("daily", help="append an entry to today's daily note")
@@ -119,6 +138,35 @@ def _cmd_recall(args, cfg, idx) -> None:
         print(block)
 
 
+def _cmd_context(args, cfg, idx) -> None:
+    if args.reindex:
+        idx.reindex(cfg.vault)
+    project = args.project or detect_project(args.project_dir or os.getcwd())
+    pack = build_context(
+        idx,
+        args.query,
+        project=project,
+        k=args.k,
+        budget=args.budget,
+    )
+    if args.json:
+        print(json.dumps(pack, ensure_ascii=False, indent=2))
+    else:
+        print(pack["markdown"])
+
+
+def _cmd_bench(args, cfg, idx) -> None:
+    from .bench import evaluate, format_report, load_cases
+
+    if args.reindex:
+        idx.reindex(cfg.vault)
+    report = evaluate(idx, load_cases(args.cases), k=args.k)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(format_report(report))
+
+
 def _cmd_write(args, cfg, idx) -> None:
     body = args.body
     if body in (None, "-"):
@@ -133,6 +181,7 @@ def _cmd_write(args, cfg, idx) -> None:
         project=args.project,
         tags=_csv(args.tags),
         links=_csv(args.links),
+        supersedes=_csv(args.supersedes),
         id=args.id,
     )
     print(json.dumps(result, ensure_ascii=False))
@@ -189,10 +238,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     cfg = Config(args.vault)
-    # Semantic (embedding) index for search/reindex/write; FTS-only fast path
-    # for recall/daily/get so the SessionStart hook never loads the model.
+    # Semantic (embedding) index for search/reindex/write/context; FTS-only
+    # fast path for recall/daily/get so SessionStart never loads the model.
     emb = None
-    if args.cmd in ("reindex", "search", "write"):
+    if args.cmd in ("reindex", "search", "write", "context", "bench"):
         from .embed import Embedder
         if Embedder.is_available():
             emb = Embedder()
@@ -220,6 +269,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(note, ensure_ascii=False, indent=2) if note else "not found")
         elif args.cmd == "recall":
             _cmd_recall(args, cfg, idx)
+        elif args.cmd == "context":
+            _cmd_context(args, cfg, idx)
+        elif args.cmd == "bench":
+            _cmd_bench(args, cfg, idx)
         elif args.cmd == "write":
             _cmd_write(args, cfg, idx)
         elif args.cmd == "daily":

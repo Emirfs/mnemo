@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS notes (
     tags     TEXT,
     created  TEXT,
     updated  TEXT,
+    status   TEXT,
     body     TEXT
 );
 
@@ -73,11 +74,22 @@ class Index:
         if embedder is not None:
             self._enable_vectors()
         self.con.executescript(SCHEMA)
+        self._migrate()
         if self.vectors:
             self.con.execute(
                 "CREATE VIRTUAL TABLE IF NOT EXISTS vec_notes USING vec0("
                 f"note_id TEXT, embedding float[{embedder.dim}] distance_metric=cosine)"
             )
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a vault's index was first built.
+
+        The index is rebuildable, but older DBs in the wild predate ``status``;
+        add it in place so retrieval filters never hit a missing column.
+        """
+        cols = {r["name"] for r in self.con.execute("PRAGMA table_info(notes)")}
+        if "status" not in cols:
+            self.con.execute("ALTER TABLE notes ADD COLUMN status TEXT")
 
     def _enable_vectors(self) -> None:
         try:
@@ -126,12 +138,12 @@ class Index:
         self.con.execute(
             """INSERT INTO notes
                (id, path, mtime, hash, type, project, title, summary, tags,
-                created, updated, body)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                created, updated, status, body)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 note.id, rel, mtime, h, note.type, note.project, note.title,
                 note.summary, json.dumps(note.tags, ensure_ascii=False),
-                note.created, note.updated, note.body,
+                note.created, note.updated, note.status or "active", note.body,
             ),
         )
         self.con.execute(

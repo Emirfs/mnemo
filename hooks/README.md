@@ -1,9 +1,15 @@
-# mnemo hooks — auto-recall (PUSH)
+# mnemo hooks — auto-recall (read) + auto-save (write)
 
-This is the part that closes the read loop. An MCP tool is *pull* (the model
-must choose to search). A SessionStart hook is *push*: it runs every time a
-session starts and injects the relevant memory into context **before** the
-model does anything — no asking required.
+Two loops close the memory cycle:
+
+- **Auto-recall (PUSH/read)** — a `SessionStart` hook injects relevant memory
+  into context **before** the model does anything. No asking required.
+- **Auto-save (controlled WRITE)** — `PostToolUse` + `Stop` hooks nudge the
+  model to write **one atomic note per session**, but only after real work and
+  green tests, so memory never fills with junk.
+
+An MCP tool is *pull* (the model must choose to search/write); these hooks are
+*push*.
 
 ## How it works
 
@@ -21,18 +27,49 @@ session starts
 The recall block is token-disciplined: **summaries only**, each with an id the
 model can expand with `mnemo get <id>` when it needs the full note.
 
+## Auto-save (the write loop)
+
+Auto-recall reads; nothing writes back unless you do it by hand. `auto_save.py`
+closes that gap **without junking memory** — no blind auto-write, no LLM in the
+hook.
+
+```
+PostToolUse (every tool)        Stop (turn boundary)
+  ├─ Edit/Write   → dirty         ├─ stop_hook_active? → allow (no re-block)
+  ├─ ran tests    → test_ran      ├─ already saved / nudged? → allow
+  │   exit != 0   → test_failed   ├─ not dirty?      → allow (no real work)
+  └─ mnemo write  → saved         ├─ test_failed?    → allow (don't save red)
+        (per-session state)       └─ else → BLOCK once:
+                                       "save ONE atomic note, or reply NOMEM"
+                                          └─ model summarizes → memory_write
+                                             → next Stop sees `saved` → allow
+```
+
+Why it stays clean:
+
+- **Gated:** fires only when code changed **and** tests aren't failing.
+- **Once per session:** blocks at most one turn (`nudged` + `stop_hook_active`).
+- **Model is the filter:** it writes the summary itself (free, in context) or
+  replies `NOMEM` if nothing's worth keeping. `mnemo write` also dedups by title.
+
+Per-session state lives in a small JSON file under the OS temp dir
+(`mnemo-autosave/<session_id>.json`).
+
 ## Install
 
 1. Put `mnemo` on PATH:
    ```bash
-   uv tool install mnemo        # or: pipx install mnemo
+   uv tool install mnemofish        # or: pipx install mnemofish
    ```
 2. Point it at your memory vault (a private git repo of markdown):
    - either pass `--vault <path>` in the hook command (see `settings.example.json`), or
    - set `MNEMO_VAULT` in your environment.
-3. Copy the `SessionStart` block from `settings.example.json` into your Claude
-   Code settings (`<project>/.claude/settings.json` or `~/.claude/settings.json`),
-   fixing the vault path.
+3. Copy the hook blocks from `settings.example.json` into your Claude Code
+   settings (`<project>/.claude/settings.json` or `~/.claude/settings.json`),
+   fixing the vault path. `SessionStart` alone gives you auto-recall; add the
+   `PostToolUse` + `Stop` blocks for auto-save (`python` must be on PATH, and the
+   path `$CLAUDE_PROJECT_DIR/hooks/auto_save.py` must resolve — or point it at an
+   absolute copy of the script).
 
 ## Matchers
 

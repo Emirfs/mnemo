@@ -44,12 +44,14 @@ class Search:
         results: list[dict] = []
         for nid, score in fused:
             n = self.con.execute(
-                "SELECT id, type, project, title, summary, path, tags "
-                "FROM notes WHERE id = ?",
+                "SELECT id, type, project, title, summary, path, tags, "
+                "created, updated, status FROM notes WHERE id = ?",
                 (nid,),
             ).fetchone()
             if n is None:
                 continue
+            if (n["status"] or "active") != "active":
+                continue  # superseded / expired notes stay out of retrieval
             if type and n["type"] != type:
                 continue
             if project and n["project"] != project:
@@ -66,6 +68,8 @@ class Search:
                     "summary": n["summary"],
                     "path": n["path"],
                     "tags": ntags,
+                    "created": n["created"],
+                    "updated": n["updated"],
                     "score": round(score, 5),
                 }
             )

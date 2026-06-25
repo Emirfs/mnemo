@@ -30,6 +30,7 @@ _FOLDER = {
     "daily": "daily",
     "reference": "reference",
     "note": "notes",
+    "profile": "profile",
 }
 
 
@@ -46,6 +47,28 @@ def _target_path(vault: Path, type_: str, project: str | None, fid: str) -> Path
     return folder / f"{fid}.md"
 
 
+def _mark_superseded(vault: Path, index, old_ids: list[str], new_id: str, today: str) -> list[str]:
+    """Flag each old note as superseded by ``new_id`` (kept on disk, hidden
+    from retrieval). Returns the ids actually updated."""
+    done: list[str] = []
+    for oid in old_ids:
+        row = Search(index).get(oid)
+        if not row or oid == new_id:
+            continue
+        path = vault / row["path"]
+        post = frontmatter.load(str(path))
+        meta = post.metadata
+        meta["status"] = "superseded"
+        prev = meta.get("superseded_by") or []
+        if isinstance(prev, str):
+            prev = [prev]
+        meta["superseded_by"] = sorted(set(prev) | {new_id})
+        meta["updated"] = today
+        path.write_text(frontmatter.dumps(post), encoding="utf-8")
+        done.append(oid)
+    return done
+
+
 def write_note(
     cfg,
     index,
@@ -57,11 +80,13 @@ def write_note(
     project: str | None = None,
     tags: list[str] | None = None,
     links: list[str] | None = None,
+    supersedes: list[str] | None = None,
     id: str | None = None,
 ) -> dict:
     vault = cfg.vault
     tags = tags or []
     links = links or []
+    supersedes = supersedes or []
     today = _dt.date.today().isoformat()
 
     # --- dedup: same type/project + equivalent title -> update in place ---
@@ -97,6 +122,8 @@ def write_note(
             meta["tags"] = sorted(set(meta.get("tags", []) or []) | set(tags))
         if links:
             meta["links"] = sorted(set(meta.get("links", []) or []) | set(links))
+        if supersedes:
+            meta["supersedes"] = sorted(set(meta.get("supersedes", []) or []) | set(supersedes))
         meta["updated"] = today
         if body:
             post.content = body
@@ -119,10 +146,18 @@ def write_note(
             meta["tags"] = tags
         if links:
             meta["links"] = links
+        if supersedes:
+            meta["supersedes"] = supersedes
         post = frontmatter.Post(body or "", **meta)
         action = "created"
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(frontmatter.dumps(post), encoding="utf-8")
-    index.reindex(vault)
-    return {"action": action, "id": fid, "path": str(path.relative_to(vault))}
+    index.reindex(vault)  # so _mark_superseded can resolve old note paths
+    superseded = _mark_superseded(vault, index, supersedes, fid, today) if supersedes else []
+    if superseded:
+        index.reindex(vault)
+    result = {"action": action, "id": fid, "path": str(path.relative_to(vault))}
+    if superseded:
+        result["superseded"] = superseded
+    return result

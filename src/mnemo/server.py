@@ -73,16 +73,19 @@ def build_server(vault: str | None = None):
         project: str | None = None,
         tags: list[str] | None = None,
         links: list[str] | None = None,
+        supersedes: list[str] | None = None,
     ) -> dict:
         """Add or update a memory note. Deduped by title within the same
         type/project (an equivalent title updates in place, not a duplicate).
-        type: decision | lesson | daily | project | reference | note."""
+        type: decision | lesson | daily | project | reference | note | profile.
+        Pass `supersedes` with ids this note replaces — those are marked stale
+        and drop out of recall, so newer facts win over older contradictory ones."""
         idx = _open()
         try:
             return write_note(
                 cfg, idx,
                 type=type, title=title, summary=summary, body=body,
-                project=project, tags=tags, links=links,
+                project=project, tags=tags, links=links, supersedes=supersedes,
             )
         finally:
             idx.close()

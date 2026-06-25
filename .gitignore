@@ -17,3 +17,5 @@ venv/
 .cache/
 
 .playwright-mcp/
+
+.obsidian/

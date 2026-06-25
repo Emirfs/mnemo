@@ -1,5 +1,5 @@
 {
-  "//": "Copy this SessionStart hook into your Claude Code settings.json (project .claude/settings.json or ~/.claude/settings.json). It injects the relevant mnemo recall block at session start — the PUSH side of memory. Replace the vault path. 'mnemo' must be on PATH (e.g. `uv tool install mnemo`).",
+  "//": "Copy these hooks into your Claude Code settings.json (project .claude/settings.json or ~/.claude/settings.json). SessionStart = auto-recall (PUSH/read). PostToolUse + Stop = auto-save (controlled WRITE): the Stop hook nudges the model to save ONE atomic note once per session, only after code changed and tests are not failing. Replace the vault path. 'mnemo' and 'python' must be on PATH.",
   "hooks": {
     "SessionStart": [
       {
@@ -9,6 +9,29 @@
             "type": "command",
             "command": "mnemo --vault \"C:/Users/you/my-memory\" recall --hook --reindex --project-dir \"$CLAUDE_PROJECT_DIR\"",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/hooks/auto_save.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/hooks/auto_save.py\"",
+            "timeout": 10
           }
         ]
       }
