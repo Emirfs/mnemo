@@ -6,7 +6,7 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
-IGNORE_DIRS = {".git", ".mnemo", ".obsidian", "node_modules", "__pycache__", ".trash"}
+IGNORE_DIRS = {".git", ".mnemo", ".obsidian", ".venv", "node_modules", "__pycache__", ".trash"}
 
 
 def iter_note_files(vault: Path) -> Iterator[Path]:

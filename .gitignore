@@ -19,3 +19,7 @@ venv/
 .playwright-mcp/
 
 .obsidian/
+
+# local-only content (not for the tool repo)
+marketing/
+notes/
