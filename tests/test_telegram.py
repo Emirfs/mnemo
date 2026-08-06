@@ -65,6 +65,7 @@ def test_ask_uses_isolated_bridge(monkeypatch, tmp_path: Path):
     response = service.handle(12, "/ask claude inspect decision")
 
     assert "reviewed" in response
+    assert "untrusted AI analysis" in response
     assert captured["provider"] == "claude"
     assert captured["envelope"].project == "p"
     assert captured["workdir"].name == "mnemo-bridge"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import time
@@ -14,6 +15,26 @@ from .context import build_context
 
 _PROVIDERS = {"claude", "codex", "gemini"}
 _MAX_OUTPUT = 20_000
+_CLAUDE_SCHEMA = json.dumps(
+    {
+        "type": "object",
+        "properties": {
+            "answer": {"type": "string"},
+            "citations": {"type": "array", "items": {"type": "string"}},
+            "assumptions": {"type": "array", "items": {"type": "string"}},
+            "warnings": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["answer", "citations", "assumptions", "warnings"],
+        "additionalProperties": False,
+    },
+    separators=(",", ":"),
+)
+_BLOCKED_OUTPUT = re.compile(
+    r"<\s*/?\s*(?:invoke|parameter)\b|"
+    r"mnemo-security-probe|dump-secrets|export-secrets|"
+    r"\btool[_ -]?(?:call|use)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -106,6 +127,8 @@ def _command(provider: str, executable: str) -> list[str]:
             "--no-session-persistence",
             "--effort",
             "low",
+            "--json-schema",
+            _CLAUDE_SCHEMA,
         ]
     if provider == "codex":
         return [
@@ -132,14 +155,44 @@ def _command(provider: str, executable: str) -> list[str]:
     ]
 
 
+def _format_structured(data: dict) -> str:
+    lines = [str(data["answer"]).strip()]
+    for label, key in (
+        ("Citations", "citations"),
+        ("Assumptions", "assumptions"),
+        ("Warnings", "warnings"),
+    ):
+        values = data.get(key) or []
+        if values:
+            lines.append(f"\n{label}:\n" + "\n".join(f"- {value}" for value in values))
+    return "\n".join(lines).strip()
+
+
 def _output(provider: str, stdout: str) -> str:
     stdout = stdout.strip()
-    if provider not in {"claude", "gemini"} or not stdout:
+    if not stdout:
+        return stdout
+    if provider == "codex":
         return stdout
     try:
         data = json.loads(stdout)
     except json.JSONDecodeError:
+        if provider == "claude":
+            raise ValueError("Claude returned non-JSON output")
         return stdout
+    if provider == "claude":
+        structured = data.get("structured_output")
+        if not isinstance(structured, dict):
+            result = data.get("result")
+            if isinstance(result, str):
+                try:
+                    structured = json.loads(result)
+                except json.JSONDecodeError:
+                    structured = None
+        required = {"answer", "citations", "assumptions", "warnings"}
+        if not isinstance(structured, dict) or set(structured) != required:
+            raise ValueError("Claude did not satisfy the bridge output schema")
+        return _format_structured(structured)
     for key in ("result", "response", "output"):
         if isinstance(data.get(key), str):
             return data[key].strip()
@@ -151,6 +204,12 @@ def _bounded(text: str) -> str:
     if len(text) <= _MAX_OUTPUT:
         return text
     return text[:_MAX_OUTPUT].rstrip() + "\n[truncated]"
+
+
+def _safe_output(text: str) -> str:
+    if _BLOCKED_OUTPUT.search(text):
+        raise ValueError("provider output contained blocked tool or secret-extraction syntax")
+    return _bounded(text)
 
 
 def run_bridge(
@@ -191,10 +250,26 @@ def run_bridge(
             error=str(exc),
             duration_seconds=round(time.monotonic() - started, 3),
         )
+    duration = round(time.monotonic() - started, 3)
+    if proc.returncode:
+        return BridgeResult(
+            provider=provider,
+            success=False,
+            error=_bounded(proc.stderr),
+            duration_seconds=duration,
+        )
+    try:
+        output = _safe_output(_output(provider, proc.stdout))
+    except ValueError as exc:
+        return BridgeResult(
+            provider=provider,
+            success=False,
+            error=f"provider output blocked: {exc}",
+            duration_seconds=duration,
+        )
     return BridgeResult(
         provider=provider,
-        success=proc.returncode == 0,
-        output=_bounded(_output(provider, proc.stdout)),
-        error=_bounded(proc.stderr) if proc.returncode else "",
-        duration_seconds=round(time.monotonic() - started, 3),
+        success=True,
+        output=output,
+        duration_seconds=duration,
     )

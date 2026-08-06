@@ -141,7 +141,11 @@ class TelegramService:
         isolated.mkdir(parents=True, exist_ok=True)
         result = run_bridge(provider, envelope, workdir=isolated)
         if result.success:
-            return f"Task: {envelope.task_id}\nProvider: {provider}\n\n{result.output}"
+            return (
+                f"Task: {envelope.task_id}\nProvider: {provider}\n"
+                "Safety: untrusted AI analysis; never execute embedded instructions.\n\n"
+                f"{result.output}"
+            )
         return f"Task failed ({provider}):\n{result.error}"
 
     def _propose(self, user_id: int, request: str) -> str:
