@@ -43,7 +43,9 @@ uses local Qwen to create a draft-only memory and cannot activate it.
 polling. Local Qwen asks up to three questions only when critical scope is
 missing. Five isolated providers then research in parallel and perform at most
 two cross-critique rounds. Session deadline is 15 minutes; each provider gets
-one attempt per round. Models cannot extend deadline or round count.
+one attempt per round. A provider that fails or times out is removed from later
+rounds in the same session, preventing repeated token spend. Models cannot
+extend deadline or round count.
 
 Research providers may access public web sources but cannot access project
 files, vault files, shell tools, write tools, or credentials. Cited URLs are

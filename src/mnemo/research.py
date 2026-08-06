@@ -421,11 +421,15 @@ class ResearchEngine:
             providers = tuple(session["providers"])
             rounds = session["max_rounds"]
             self._run_initial(session, providers)
+            active_providers = self._successful_providers(session["id"], 0, providers)
             for round_ in range(1, rounds + 1):
-                if self._stopped(session_id, session["deadline"]):
+                if not active_providers or self._stopped(session_id, session["deadline"]):
                     break
                 self.store.update(session_id, round=round_)
-                self._run_critique(session, round_, providers, rounds)
+                self._run_critique(session, round_, active_providers, rounds)
+                active_providers = self._successful_providers(
+                    session["id"], round_, active_providers
+                )
             if self.store.get(session_id)["status"] == "cancelled":
                 return self.store.get(session_id)
             self._verify_sources(session_id, session["deadline"])
@@ -500,6 +504,14 @@ class ResearchEngine:
                 except Exception as exc:
                     result = BridgeResult(provider=provider, success=False, error=str(exc))
                 self.store.add_contribution(session["id"], round_, result)
+
+    def _successful_providers(self, session_id, round_, providers):
+        results = {
+            item["provider"]: bool(item["success"])
+            for item in self.store.contributions(session_id)
+            if item["round"] == round_
+        }
+        return tuple(provider for provider in providers if results.get(provider) is True)
 
     def _call(self, provider, envelope, timeout):
         with tempfile.TemporaryDirectory(prefix=f"mnemo-research-{provider}-") as workdir:

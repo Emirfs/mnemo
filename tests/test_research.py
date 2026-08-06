@@ -84,7 +84,8 @@ def test_engine_does_not_retry_failed_provider(tmp_path):
     result = engine.run(engine.create("topic", 1))
 
     assert result["status"] == "partial"
-    assert counts == {provider: 3 for provider in PROVIDERS}
+    assert counts["claude"] == 1
+    assert all(counts[provider] == 3 for provider in PROVIDERS if provider != "claude")
 
 
 def test_clarification_is_capped_at_three(monkeypatch):
