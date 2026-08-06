@@ -39,7 +39,7 @@ def test_research_envelope_allows_only_network_research():
     assert "access local project files" in prompt
 
 
-@pytest.mark.parametrize("provider", ["claude", "codex", "omp"])
+@pytest.mark.parametrize("provider", ["claude", "codex", "omp", "opencode"])
 def test_research_mode_enables_bounded_web_tools(provider):
     command = bridge._command(provider, f"{provider}.exe", mode="research")
     if provider == "claude":
@@ -48,10 +48,12 @@ def test_research_mode_enables_bounded_web_tools(provider):
     elif provider == "codex":
         assert "--search" in command
         assert "read-only" in command
-    else:
+    elif provider == "omp":
         assert "web_search,browser" in command
         assert "--auto-approve" in command
         assert "bash" not in command
+    else:
+        assert command[-2:] == ["--agent", "plan"]
 
 
 @pytest.mark.parametrize(

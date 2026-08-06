@@ -192,7 +192,10 @@ def _command(provider: str, executable: str, mode: str = "analysis") -> list[str
             command.append("--no-tools")
         return command
     if provider == "opencode":
-        return [executable, "run", "--pure", "--format", "json"]
+        command = [executable, "run", "--pure", "--format", "json"]
+        if mode == "research":
+            command.extend(["--agent", "plan"])
+        return command
     return [
         executable,
         "--prompt",
