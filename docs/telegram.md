@@ -16,6 +16,8 @@ The Telegram front-end is deliberately read-only. It exposes only:
 - `/merge <completed-proposal-id>`
 - `/repos`
 - `/use <route-alias>`
+- `/feedback <task-id> <good|bad> [note]`
+- `/feedback-stats`
 - `/help`
 
 External AI analysis uses the isolated bridge policy described in `bridge.md`.
@@ -47,6 +49,10 @@ For multiple repositories, pass `--repos routes.json`:
 
 Use `/repos` and `/use stpm-fc` to switch scope. Every proposal stores the
 resolved repository path, so later route changes cannot redirect an approval.
+
+Successful `/ask` responses include **Good** and **Bad** buttons. Human labels
+are bound to the Telegram user and stored locally for evaluation or future LoRA
+training. Export labelled rows with `mnemo feedback-export training.jsonl`.
 
 ## Setup
 

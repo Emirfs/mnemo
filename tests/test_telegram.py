@@ -72,8 +72,10 @@ def test_ask_uses_isolated_bridge(monkeypatch, tmp_path: Path):
     service = TelegramService(tmp_path, "p", {12})
     response = service.handle(12, "/ask claude inspect decision")
 
-    assert "reviewed" in response
-    assert "untrusted AI analysis" in response
+    assert isinstance(response, TelegramReply)
+    assert "reviewed" in response.text
+    assert "untrusted AI analysis" in response.text
+    assert response.buttons[0][0]["callback_data"].startswith("feedback:good:")
     assert captured["provider"] == "claude"
     assert captured["envelope"].project == "p"
     assert captured["workdir"].name == "mnemo-bridge"

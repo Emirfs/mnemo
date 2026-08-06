@@ -127,6 +127,9 @@ def _build_parser() -> argparse.ArgumentParser:
     stg.add_argument("--repos", help="JSON file containing multiple Telegram repo routes")
     stg.add_argument("--once", action="store_true", help="poll once, then exit")
 
+    sfe = sub.add_parser("feedback-export", help="export labelled bridge interactions")
+    sfe.add_argument("out")
+
     sd = sub.add_parser("daily", help="append an entry to today's daily note")
     sd.add_argument("text", nargs="?", help="entry text; omitted/'-' reads stdin")
 
@@ -320,6 +323,15 @@ def main(argv: list[str] | None = None) -> int:
             routes=load_routes(args.repos) if args.repos else None,
             once=args.once,
         )
+        return 0
+
+    if args.cmd == "feedback-export":
+        from .feedback import FeedbackStore
+
+        cfg = Config(args.vault)
+        with FeedbackStore(cfg.index_path.with_name("feedback.sqlite")) as store:
+            count = store.export(args.out)
+        print(json.dumps({"exported": count, "path": args.out}))
         return 0
 
     if args.cmd == "project":

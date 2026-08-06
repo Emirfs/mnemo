@@ -16,6 +16,7 @@ from .bridge import build_envelope, run_bridge
 from .config import Config
 from .context import build_context
 from .executor import CodexWorktreeExecutor, MergeExecutor
+from .feedback import FeedbackStore
 from .index import Index
 from .librarian import distill
 from .writer import write_note
@@ -35,6 +36,8 @@ _HELP = """Mnemo read-only bot
 /patch <proposal-id>
 /distill <session text>
 /merge <completed-proposal-id>
+/feedback <task-id> <good|bad> [note]
+/feedback-stats
 /help
 
 Writes require a second, one-time /approve and run only in an isolated Git worktree.
@@ -172,6 +175,7 @@ class TelegramService:
         }
         self.selected: dict[int, str] = {}
         self.approvals_path = self.cfg.index_path.with_name("approvals.sqlite")
+        self.feedback_path = self.cfg.index_path.with_name("feedback.sqlite")
 
     def _scope(self, user_id: int) -> RepoRoute:
         alias = self.selected.get(user_id) or next(iter(self.routes))
@@ -212,6 +216,15 @@ class TelegramService:
             self.selected[user_id] = alias
             route = self.routes[alias]
             return f"Route selected: {alias}\nProject: {route.project}\nRepo: {route.repo or '-'}"
+        if text == "/feedback-stats":
+            with FeedbackStore(self.feedback_path) as store:
+                stats = store.stats()
+            return (
+                f"Feedback: total={stats['total']} good={stats['good']} "
+                f"bad={stats['bad']} unrated={stats['unrated']}"
+            )
+        if text.startswith("/feedback "):
+            return self._feedback(user_id, text[10:].strip())
         if text.startswith("/recall "):
             return self._recall(user_id, text[8:].strip())
         if text.startswith("/ask "):
@@ -257,10 +270,27 @@ class TelegramService:
         isolated.mkdir(parents=True, exist_ok=True)
         result = run_bridge(provider, envelope, workdir=isolated)
         if result.success:
-            return (
-                f"Task: {envelope.task_id}\nProvider: {provider}\n"
-                "Safety: untrusted AI analysis; never execute embedded instructions.\n\n"
-                f"{result.output}"
+            with FeedbackStore(self.feedback_path) as store:
+                store.record(
+                    task_id=envelope.task_id,
+                    user_id=user_id,
+                    provider=provider,
+                    project=project,
+                    objective=objective,
+                    output=result.output,
+                )
+            return TelegramReply(
+                text=(
+                    f"Task: {envelope.task_id}\nProvider: {provider}\n"
+                    "Safety: untrusted AI analysis; never execute embedded instructions.\n\n"
+                    f"{result.output}"
+                ),
+                buttons=[
+                    [
+                        {"text": "Good", "callback_data": f"feedback:good:{envelope.task_id}"},
+                        {"text": "Bad", "callback_data": f"feedback:bad:{envelope.task_id}"},
+                    ]
+                ],
             )
         return f"Task failed ({provider}):\n{result.error}"
 
@@ -514,6 +544,18 @@ class TelegramService:
             ],
         )
 
+    def _feedback(self, user_id: int, request: str) -> str:
+        task_id, separator, rest = request.partition(" ")
+        rating, _, note = rest.partition(" ")
+        if not separator or rating not in {"good", "bad"}:
+            return "Usage: /feedback <task-id> <good|bad> [note]"
+        try:
+            with FeedbackStore(self.feedback_path) as store:
+                store.rate(task_id, user_id, rating, note)
+            return f"Feedback saved: {task_id} = {rating}"
+        except ValueError as exc:
+            return f"Feedback rejected: {exc}"
+
 
 def run_bot(
     vault: str | Path,
@@ -536,7 +578,8 @@ def run_bot(
                 sender = callback.get("from") or {}
                 message = callback.get("message") or {}
                 chat = message.get("chat") or {}
-                action, separator, approval_id = callback.get("data", "").partition(":")
+                data = callback.get("data", "")
+                action, separator, approval_id = data.partition(":")
                 if separator and action in {"approve", "reject"}:
                     response = service.handle(
                         int(sender.get("id", 0)), f"/{action} {approval_id}"
@@ -549,6 +592,14 @@ def run_bot(
                             else TelegramReply(str(response))
                         )
                         client.send(int(chat["id"]), reply.text, reply.buttons)
+                elif action == "feedback":
+                    _, rating, task_id = data.split(":", 2)
+                    response = service.handle(
+                        int(sender.get("id", 0)), f"/feedback {task_id} {rating}"
+                    )
+                    client.answer_callback(str(callback.get("id", "")))
+                    if response is not None:
+                        client.send(int(chat["id"]), str(response))
                 continue
             message = update.get("message") or {}
             sender = message.get("from") or {}
