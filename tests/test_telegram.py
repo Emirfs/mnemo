@@ -4,9 +4,16 @@ from pathlib import Path
 
 import pytest
 
+from mnemo.approval import ApprovalStore
 from mnemo.bridge import BridgeResult
 from mnemo.executor import ExecutionResult
-from mnemo.telegram import TelegramClient, TelegramService, chunks, parse_users
+from mnemo.telegram import (
+    TelegramClient,
+    TelegramReply,
+    TelegramService,
+    chunks,
+    parse_users,
+)
 
 
 def _write_note(vault: Path):
@@ -100,8 +107,10 @@ def test_client_error_does_not_expose_token(monkeypatch):
 def test_proposal_requires_second_approval(monkeypatch, tmp_path: Path):
     service = TelegramService(tmp_path / "vault", "p", {12}, repo=tmp_path)
     proposal = service.handle(12, "/propose codex Change one file")
-    approval_id = proposal.splitlines()[0].split(": ", 1)[1]
-    assert f"/approve {approval_id}" in proposal
+    assert isinstance(proposal, TelegramReply)
+    approval_id = proposal.text.splitlines()[0].split(": ", 1)[1]
+    assert f"/approve {approval_id}" in proposal.text
+    assert proposal.buttons[0][0]["callback_data"] == f"approve:{approval_id}"
 
     called = []
 
@@ -136,7 +145,7 @@ def test_proposal_requires_second_approval(monkeypatch, tmp_path: Path):
 def test_proposal_can_be_rejected(tmp_path: Path):
     service = TelegramService(tmp_path / "vault", "p", {12}, repo=tmp_path)
     proposal = service.handle(12, "/propose codex Task")
-    approval_id = proposal.splitlines()[0].split(": ", 1)[1]
+    approval_id = proposal.text.splitlines()[0].split(": ", 1)[1]
     assert "rejected" in service.handle(12, f"/reject {approval_id}")
     assert "Status: rejected" in service.handle(12, f"/proposal {approval_id}")
 
@@ -152,6 +161,40 @@ def test_flow_analyzes_before_creating_proposal(monkeypatch, tmp_path: Path):
 
     response = service.handle(12, "/flow add a safe feature")
 
-    assert "Claude analysis" in response
-    assert "safe implementation plan" in response
-    assert "/approve" in response
+    assert isinstance(response, TelegramReply)
+    assert "Claude analysis" in response.text
+    assert "safe implementation plan" in response.text
+    assert "/approve" in response.text
+
+
+def test_telegram_distill_writes_only_draft(monkeypatch, tmp_path: Path):
+    service = TelegramService(tmp_path / "vault", "p", {12})
+    monkeypatch.setattr(
+        "mnemo.telegram.distill",
+        lambda text: {
+            "remember": True,
+            "type": "decision",
+            "title": "Remote decision",
+            "summary": "Draft only.",
+            "body": "",
+            "tags": ["telegram"],
+            "supersedes": [],
+            "reason": "durable",
+        },
+    )
+    response = service.handle(12, "/distill remember this decision")
+    assert "Qwen draft" in response
+    note = next((tmp_path / "vault").rglob("*.md")).read_text(encoding="utf-8")
+    assert "status: draft" in note
+    assert "verification: inferred" in note
+
+
+def test_patch_rejects_untrusted_worktree_path(tmp_path: Path):
+    service = TelegramService(tmp_path / "vault", "p", {12}, repo=tmp_path)
+    proposal = service.handle(12, "/propose codex Task")
+    approval_id = proposal.text.splitlines()[0].split(": ", 1)[1]
+    with ApprovalStore(service.approvals_path) as store:
+        store.claim(approval_id, 12)
+        store.finish(approval_id, success=True, worktree=tmp_path / "outside")
+    response = service.handle(12, f"/patch {approval_id}")
+    assert "failed safety validation" in response

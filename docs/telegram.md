@@ -4,12 +4,15 @@ The Telegram front-end is deliberately read-only. It exposes only:
 
 - `/status`
 - `/recall <query>`
-- `/ask <claude|codex|gemini> <objective>`
+- `/ask <antigravity|claude|codex|omp|opencode> <objective>`
 - `/propose codex <objective>`
 - `/approve <proposal-id>`
 - `/reject <proposal-id>`
 - `/proposal <proposal-id>`
 - `/flow <objective>`
+- `/diff <proposal-id>`
+- `/patch <proposal-id>`
+- `/distill <session text>`
 - `/help`
 
 External AI analysis uses the isolated bridge policy described in `bridge.md`.
@@ -20,6 +23,10 @@ worktree and branch. It never merges, commits, pushes, or changes the main workt
 `/flow` runs the complete guarded chain: Claude read-only analysis, phone
 proposal, approved Codex worktree implementation, Claude diff review, then a
 Qwen `draft + inferred` memory candidate. Verification and merge remain manual.
+
+Proposal messages include inline **Approve** and **Reject** buttons. `/diff`
+returns bounded text; `/patch` downloads the complete Git patch. `/distill`
+uses local Qwen to create a draft-only memory and cannot activate it.
 
 ## Setup
 

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import secrets
+import subprocess
 import tempfile
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 from .approval import ApprovalStore
@@ -28,10 +31,20 @@ _HELP = """Mnemo read-only bot
 /reject <proposal-id>
 /proposal <proposal-id>
 /flow <objective>
+/diff <proposal-id>
+/patch <proposal-id>
+/distill <session text>
 /help
 
 Writes require a second, one-time /approve and run only in an isolated Git worktree.
 No merge, push, delete, verify, or memory-write commands are exposed."""
+
+
+@dataclass
+class TelegramReply:
+    text: str
+    buttons: list[list[dict]] | None = None
+    document: Path | None = None
 
 
 def parse_users(value: str) -> set[int]:
@@ -72,14 +85,50 @@ class TelegramClient:
         return payload["result"]
 
     def updates(self, offset: int | None) -> list[dict]:
-        data = {"timeout": 30, "allowed_updates": json.dumps(["message"])}
+        data = {
+            "timeout": 30,
+            "allowed_updates": json.dumps(["message", "callback_query"]),
+        }
         if offset is not None:
             data["offset"] = offset
         return self._call("getUpdates", data)
 
-    def send(self, chat_id: int, text: str) -> None:
-        for chunk in chunks(text):
-            self._call("sendMessage", {"chat_id": chat_id, "text": chunk})
+    def send(
+        self, chat_id: int, text: str, buttons: list[list[dict]] | None = None
+    ) -> None:
+        for position, chunk in enumerate(chunks(text)):
+            data = {"chat_id": chat_id, "text": chunk}
+            if position == 0 and buttons:
+                data["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+            self._call("sendMessage", data)
+
+    def answer_callback(self, callback_id: str) -> None:
+        self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+
+    def send_document(self, chat_id: int, path: Path) -> None:
+        boundary = f"mnemo-{secrets.token_hex(12)}"
+        prefix = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
+            f"{chat_id}\r\n"
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="document"; filename="{path.name}"\r\n'
+            "Content-Type: text/plain\r\n\r\n"
+        ).encode("utf-8")
+        body = prefix + path.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
+        request = urllib.request.Request(
+            f"{self.base_url}/sendDocument",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            raise RuntimeError("Telegram API request failed: sendDocument") from None
+        if not payload.get("ok"):
+            raise RuntimeError("Telegram API failed: sendDocument")
 
 
 class TelegramService:
@@ -98,7 +147,7 @@ class TelegramService:
         self.repo = Path(repo).resolve() if repo else None
         self.approvals_path = self.cfg.index_path.with_name("approvals.sqlite")
 
-    def handle(self, user_id: int, text: str) -> str | None:
+    def handle(self, user_id: int, text: str) -> str | TelegramReply | None:
         if user_id not in self.users:
             return None
         text = (text or "").strip()
@@ -126,6 +175,12 @@ class TelegramService:
             return self._proposal(user_id, text[10:].strip())
         if text.startswith("/flow "):
             return self._flow(user_id, text[6:].strip())
+        if text.startswith("/diff "):
+            return self._diff(user_id, text[6:].strip(), download=False)
+        if text.startswith("/patch "):
+            return self._diff(user_id, text[7:].strip(), download=True)
+        if text.startswith("/distill "):
+            return self._distill(user_id, text[9:].strip())
         return _HELP
 
     def _recall(self, query: str) -> str:
@@ -162,15 +217,25 @@ class TelegramService:
             return "Usage: /propose codex <objective>"
         return self._create_proposal(user_id, provider, objective)
 
-    def _create_proposal(self, user_id: int, provider: str, objective: str) -> str:
+    def _create_proposal(
+        self, user_id: int, provider: str, objective: str
+    ) -> TelegramReply:
         with ApprovalStore(self.approvals_path) as store:
             approval = store.create(
                 user_id=user_id, provider=provider, objective=objective, repo=self.repo
             )
-        return (
-            f"Proposal: {approval.id}\nRepo: {approval.repo}\n"
-            f"Expires: {approval.expires_at}\nTask: {approval.objective}\n\n"
-            f"Run: /approve {approval.id}\nReject: /reject {approval.id}"
+        return TelegramReply(
+            text=(
+                f"Proposal: {approval.id}\nRepo: {approval.repo}\n"
+                f"Expires: {approval.expires_at}\nTask: {approval.objective}\n\n"
+                f"Run: /approve {approval.id}\nReject: /reject {approval.id}"
+            ),
+            buttons=[
+                [
+                    {"text": "Approve", "callback_data": f"approve:{approval.id}"},
+                    {"text": "Reject", "callback_data": f"reject:{approval.id}"},
+                ]
+            ],
         )
 
     def _flow(self, user_id: int, objective: str) -> str:
@@ -191,7 +256,8 @@ class TelegramService:
             f"Read-only Claude analysis:\n{analysis.output[:3_500]}"
         )
         proposal = self._create_proposal(user_id, "codex", implementation)
-        return f"Claude analysis:\n{analysis.output}\n\n{proposal}"
+        proposal.text = f"Claude analysis:\n{analysis.output}\n\n{proposal.text}"
+        return proposal
 
     def _approve(self, user_id: int, approval_id: str) -> str:
         if not approval_id:
@@ -289,6 +355,72 @@ class TelegramService:
             f"Worktree: {approval.worktree or '-'}"
         )
 
+    def _owned_approval(self, user_id: int, approval_id: str):
+        with ApprovalStore(self.approvals_path) as store:
+            approval = store.get(approval_id)
+        if not approval or approval.user_id != user_id:
+            raise ValueError("proposal not found")
+        return approval
+
+    def _diff(
+        self, user_id: int, approval_id: str, *, download: bool
+    ) -> str | TelegramReply:
+        try:
+            approval = self._owned_approval(user_id, approval_id)
+        except ValueError:
+            return "Proposal not found."
+        if not approval.worktree:
+            return "Proposal has no completed worktree."
+        worktree = Path(approval.worktree).resolve()
+        allowed = (Path(tempfile.gettempdir()) / "mnemo-worktrees").resolve()
+        if allowed not in worktree.parents:
+            return "Proposal worktree path failed safety validation."
+        proc = subprocess.run(
+            ["git", "-C", str(worktree), "diff", "--no-ext-diff"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+        if proc.returncode:
+            return "Could not read proposal diff."
+        diff = proc.stdout or "(no diff)"
+        if not download:
+            return diff[:20_000]
+        patch_dir = self.cfg.index_path.parent / "patches"
+        patch_dir.mkdir(parents=True, exist_ok=True)
+        patch = patch_dir / f"{approval.id}.patch"
+        patch.write_text(diff, encoding="utf-8")
+        return TelegramReply(text=f"Patch: {approval.id}", document=patch)
+
+    def _distill(self, user_id: int, text: str) -> str:
+        if not text:
+            return "Usage: /distill <session text>"
+        try:
+            candidate = distill(text)
+            if not candidate["remember"]:
+                return f"No durable memory proposed: {candidate['reason']}"
+            with Index(self.cfg.index_path) as index:
+                index.reindex(self.cfg.vault)
+                note = write_note(
+                    self.cfg,
+                    index,
+                    type=candidate["type"],
+                    title=candidate["title"],
+                    summary=candidate["summary"],
+                    body=candidate["body"],
+                    project=self.project,
+                    tags=candidate["tags"],
+                    supersedes=candidate["supersedes"],
+                    status="draft",
+                    verification="inferred",
+                    sources=[f"telegram:{user_id}"],
+                )
+            return f"Qwen draft: {note['id']}\n{candidate['summary']}"
+        except Exception as exc:
+            return f"Distill failed safely: {exc}"
+
 
 def run_bot(
     vault: str | Path,
@@ -305,6 +437,25 @@ def run_bot(
     while True:
         for update in client.updates(offset):
             offset = int(update["update_id"]) + 1
+            callback = update.get("callback_query") or {}
+            if callback:
+                sender = callback.get("from") or {}
+                message = callback.get("message") or {}
+                chat = message.get("chat") or {}
+                action, separator, approval_id = callback.get("data", "").partition(":")
+                if separator and action in {"approve", "reject"}:
+                    response = service.handle(
+                        int(sender.get("id", 0)), f"/{action} {approval_id}"
+                    )
+                    client.answer_callback(str(callback.get("id", "")))
+                    if response is not None:
+                        reply = (
+                            response
+                            if isinstance(response, TelegramReply)
+                            else TelegramReply(str(response))
+                        )
+                        client.send(int(chat["id"]), reply.text, reply.buttons)
+                continue
             message = update.get("message") or {}
             sender = message.get("from") or {}
             chat = message.get("chat") or {}
@@ -317,6 +468,13 @@ def run_bot(
             except Exception:
                 response = "Request failed safely. Check the local service logs."
             if response is not None:
-                client.send(int(chat["id"]), response)
+                reply = (
+                    response
+                    if isinstance(response, TelegramReply)
+                    else TelegramReply(str(response))
+                )
+                client.send(int(chat["id"]), reply.text, reply.buttons)
+                if reply.document:
+                    client.send_document(int(chat["id"]), reply.document)
         if once:
             return
