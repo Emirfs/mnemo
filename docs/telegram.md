@@ -61,12 +61,13 @@ the mechanical maximum remains two rounds.
 Completion notifications contain only a short preview. `/research-result`
 returns the same preview and attaches the full Markdown record. Every terminal
 research session is archived in the Mnemo vault as one `reference` note with
-the request, configuration, final report, sources, and all provider
-conversations. Automatic archives remain `draft + inferred` until verified.
-Provider conversation excerpts are capped in Markdown for readability; complete
-raw outputs and provider errors remain in `research.sqlite`. OpenCode receives
-large research prompts through a temporary attachment, avoiding Windows command
-line length limits.
+the request, configuration, final report, sources, and a round/provider status
+index. Automatic archives remain `draft + inferred` until verified. Complete
+raw outputs and provider errors remain in `research.sqlite` and are never loaded
+into later AI context unless the user explicitly requests analysis or export.
+This preserves future evaluation/training data without recurring token cost.
+OpenCode receives large research prompts through a temporary attachment,
+avoiding Windows command line length limits.
 
 `/merge` creates a second one-time approval. After approval, Mnemo verifies the
 binary patch with `git apply --check` and applies it to a clean main worktree.

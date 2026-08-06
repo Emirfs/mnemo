@@ -729,23 +729,11 @@ class TelegramService:
             return
         contributions = store.contributions(session["id"])
         sources = store.sources(session["id"])
-
-        def excerpt(item):
-            if not item["success"]:
-                return "(provider failed; full error retained in research.sqlite)"
-            text = item["content"] or item["error"] or "(empty)"
-            if len(text) <= 1_200:
-                return text
-            return text[:1_200].rstrip() + "\n\n[truncated; full output retained in research.sqlite]"
-
-        conversation = "\n\n".join(
-            (
-                f"### Round {item['round']} - {item['provider']} "
-                f"({'success' if item['success'] else 'failed'})\n\n"
-                f"{excerpt(item)}"
-            )
+        conversation_index = "\n".join(
+            f"- Round {item['round']} - {item['provider']}: "
+            f"{'success' if item['success'] else 'failed'}"
             for item in contributions
-        )
+        ) or "(none)"
         displayed_sources = sources[:20]
         source_text = "\n".join(
             f"- {'verified' if item['verified'] else 'unverified'}: {item['url']}"
@@ -758,7 +746,10 @@ class TelegramService:
             f"User clarification: {session['answers'] or '(none)'}\n\n"
             f"## Final Report\n\n{session['report'] or session['error'] or '(none)'}\n\n"
             f"## Sources\n\n{source_text}\n\n"
-            f"## Provider Conversations\n\n{conversation or '(none)'}"
+            "## Provider Conversation Index\n\n"
+            f"{conversation_index}\n\n"
+            f"Raw conversation store: research.sqlite / session {session['id']}\n\n"
+            "Raw conversations are not loaded into AI context unless explicitly requested."
         )
         summary = self._research_preview(
             session["report"] or session["error"] or session["topic"], limit=300
@@ -772,7 +763,7 @@ class TelegramService:
             summary=summary,
             body=body,
             project=session["project"],
-            tags=["research", "multi-ai"],
+            tags=["research", "multi-ai", "raw-sql-private"],
             status="draft",
             verification="inferred",
             sources=[f"research:{session['id']}"]

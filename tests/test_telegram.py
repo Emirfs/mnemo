@@ -344,10 +344,11 @@ def test_research_is_archived_as_markdown_with_conversations(tmp_path: Path):
     assert session["note_id"] == f"research-{session_id}"
     assert "status: draft" in content
     assert "verification: inferred" in content
-    assert "## Provider Conversations" in content
-    assert "specialist evidence" in content
+    assert "## Provider Conversation Index" in content
+    assert "Round 0 - claude: success" in content
+    assert "specialist evidence" not in content
     assert "command line is too long" not in content
-    assert "provider failed; full error retained" in content
+    assert "Raw conversations are not loaded into AI context" in content
     assert isinstance(reply, TelegramReply)
     assert reply.document == note
     assert len(reply.text) < 1_600
