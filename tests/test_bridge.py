@@ -88,8 +88,13 @@ def test_bridge_uses_read_only_flags_and_stdin(monkeypatch, tmp_path, provider):
         captured["command"] = command
         captured.update(kwargs)
         file_arg = next((item for item in command if item.startswith("--file=")), None)
+        if not file_arg:
+            file_arg = next(
+                (item[1:] for item in command if item.startswith("@") and item.endswith(".md")),
+                None,
+            )
         if file_arg:
-            attachment = Path(file_arg.split("=", 1)[1])
+            attachment = Path(file_arg.split("=", 1)[-1])
             captured["attachment"] = attachment.read_text(encoding="utf-8")
         if provider == "claude":
             output = json.dumps(
@@ -131,9 +136,12 @@ def test_bridge_uses_read_only_flags_and_stdin(monkeypatch, tmp_path, provider):
         assert "analyze" not in captured["command"]
     else:
         assert captured["input"] is None
-        if provider == "opencode":
+        if provider in {"opencode", "omp"}:
             assert "analyze" in captured["attachment"]
-            assert any(item.startswith("--file=") for item in captured["command"])
+            if provider == "opencode":
+                assert any(item.startswith("--file=") for item in captured["command"])
+            else:
+                assert any(item.startswith("@") for item in captured["command"])
         else:
             assert "analyze" in captured["command"][-1]
     assert captured["cwd"] == str(tmp_path)

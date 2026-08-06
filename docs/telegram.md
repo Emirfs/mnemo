@@ -66,7 +66,7 @@ index. Automatic archives remain `draft + inferred` until verified. Complete
 raw outputs and provider errors remain in `research.sqlite` and are never loaded
 into later AI context unless the user explicitly requests analysis or export.
 This preserves future evaluation/training data without recurring token cost.
-OpenCode receives large research prompts through a temporary attachment,
+OpenCode and OMP receive large research prompts through temporary attachments,
 avoiding Windows command line length limits.
 
 `/merge` creates a second one-time approval. After approval, Mnemo verifies the

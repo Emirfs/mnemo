@@ -337,7 +337,7 @@ def run_bridge(
         )
     use_stdin = provider in {"claude", "codex", "gemini"}
     prompt_file = None
-    if provider == "opencode":
+    if provider in {"opencode", "omp"}:
         directory = str(workdir) if workdir else None
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -349,9 +349,12 @@ def run_bridge(
         ) as attachment:
             attachment.write(prompt)
             prompt_file = Path(attachment.name)
-        command.extend(
-            ["Complete the attached research task now.", f"--file={prompt_file}"]
-        )
+        if provider == "opencode":
+            command.extend(
+                ["Complete the attached research task now.", f"--file={prompt_file}"]
+            )
+        else:
+            command.extend([f"@{prompt_file}", "Complete the attached task now."])
     elif not use_stdin:
         command.append(prompt)
     started = time.monotonic()

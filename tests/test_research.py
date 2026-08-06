@@ -222,3 +222,22 @@ def test_store_migrates_existing_research_database(tmp_path):
     with sqlite3.connect(path) as db:
         columns = {row[1] for row in db.execute("PRAGMA table_info(research_sessions)")}
     assert {"providers", "max_rounds", "note_id"} <= columns
+
+
+def test_synthesis_failure_is_kept_out_of_user_report(tmp_path):
+    engine = ResearchEngine(
+        _Index(),
+        ResearchStore(tmp_path / "db"),
+        runner=lambda provider, envelope, **kwargs: BridgeResult(
+            provider, True, output="useful specialist finding"
+        ),
+        synthesizer=lambda *args: (_ for _ in ()).throw(TimeoutError("secret timeout")),
+        rounds=0,
+    )
+
+    result = engine.run(engine.create("topic", 1))
+
+    assert result["status"] == "partial"
+    assert result["error"] == "secret timeout"
+    assert "secret timeout" not in result["report"]
+    assert "useful specialist finding" in result["report"]

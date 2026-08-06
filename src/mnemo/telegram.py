@@ -766,8 +766,7 @@ class TelegramService:
             tags=["research", "multi-ai", "raw-sql-private"],
             status="draft",
             verification="inferred",
-            sources=[f"research:{session['id']}"]
-            + [item["url"] for item in displayed_sources],
+            sources=[f"research:{session['id']}"],
         )
         store.update(session["id"], note_id=note["id"])
 
