@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from mnemo.bridge import BridgeResult
+from mnemo.executor import ExecutionResult
 from mnemo.telegram import TelegramClient, TelegramService, chunks, parse_users
 
 
@@ -72,7 +73,7 @@ def test_ask_uses_isolated_bridge(monkeypatch, tmp_path: Path):
 def test_bot_has_no_write_commands(tmp_path: Path):
     service = TelegramService(tmp_path, "p", {12})
     response = service.handle(12, "/delete everything")
-    assert "No file-write" in response
+    assert "one-time /approve" in response
 
 
 def test_client_chunks_long_messages(monkeypatch):
@@ -93,3 +94,41 @@ def test_client_error_does_not_expose_token(monkeypatch):
     with pytest.raises(RuntimeError) as exc:
         client.updates(None)
     assert "top-secret-token" not in str(exc.value)
+
+
+def test_proposal_requires_second_approval(monkeypatch, tmp_path: Path):
+    service = TelegramService(tmp_path / "vault", "p", {12}, repo=tmp_path)
+    proposal = service.handle(12, "/propose codex Change one file")
+    approval_id = proposal.splitlines()[0].split(": ", 1)[1]
+    assert f"/approve {approval_id}" in proposal
+
+    called = []
+
+    class FakeExecutor:
+        def execute(self, approval):
+            called.append(approval)
+            return ExecutionResult(
+                success=True,
+                worktree="C:/temp/worktree",
+                branch=f"mnemo/task-{approval.id}",
+                output="implemented",
+                status=" M file.txt",
+                diff_stat="file.txt | 1 +",
+            )
+
+    monkeypatch.setattr("mnemo.telegram.CodexWorktreeExecutor", FakeExecutor)
+    response = service.handle(12, f"/approve {approval_id}")
+    assert "completed" in response
+    assert "file.txt" in response
+    assert len(called) == 1
+
+    second = service.handle(12, f"/approve {approval_id}")
+    assert "failed safely" in second
+
+
+def test_proposal_can_be_rejected(tmp_path: Path):
+    service = TelegramService(tmp_path / "vault", "p", {12}, repo=tmp_path)
+    proposal = service.handle(12, "/propose codex Task")
+    approval_id = proposal.splitlines()[0].split(": ", 1)[1]
+    assert "rejected" in service.handle(12, f"/reject {approval_id}")
+    assert "Status: rejected" in service.handle(12, f"/proposal {approval_id}")

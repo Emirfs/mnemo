@@ -8,9 +8,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from .approval import ApprovalStore
 from .bridge import build_envelope, run_bridge
 from .config import Config
 from .context import build_context
+from .executor import CodexWorktreeExecutor
 from .index import Index
 
 _MAX_INPUT = 8_000
@@ -19,9 +21,14 @@ _HELP = """Mnemo read-only bot
 /status
 /recall <query>
 /ask <claude|codex|gemini> <objective>
+/propose codex <objective>
+/approve <proposal-id>
+/reject <proposal-id>
+/proposal <proposal-id>
 /help
 
-No file-write, shell, delete, verify, or memory-write commands are exposed."""
+Writes require a second, one-time /approve and run only in an isolated Git worktree.
+No merge, push, delete, verify, or memory-write commands are exposed."""
 
 
 def parse_users(value: str) -> set[int]:
@@ -73,12 +80,20 @@ class TelegramClient:
 
 
 class TelegramService:
-    def __init__(self, vault: str | Path, project: str, users: set[int]):
+    def __init__(
+        self,
+        vault: str | Path,
+        project: str,
+        users: set[int],
+        repo: str | Path | None = None,
+    ):
         if not project.strip():
             raise ValueError("Telegram bot requires an explicit project")
         self.cfg = Config(vault)
         self.project = project.strip()
         self.users = users
+        self.repo = Path(repo).resolve() if repo else None
+        self.approvals_path = self.cfg.index_path.with_name("approvals.sqlite")
 
     def handle(self, user_id: int, text: str) -> str | None:
         if user_id not in self.users:
@@ -89,14 +104,23 @@ class TelegramService:
         if text in {"/start", "/help"}:
             return _HELP
         if text == "/status":
+            mode = "approval-gated worktree" if self.repo else "read-only"
             return (
-                f"Mnemo online\nProject: {self.project}\nMode: read-only\n"
+                f"Mnemo online\nProject: {self.project}\nMode: {mode}\n"
                 "Allowed: status, recall, isolated AI analysis"
             )
         if text.startswith("/recall "):
             return self._recall(text[8:].strip())
         if text.startswith("/ask "):
             return self._ask(text[5:].strip())
+        if text.startswith("/propose "):
+            return self._propose(user_id, text[9:].strip())
+        if text.startswith("/approve "):
+            return self._approve(user_id, text[9:].strip())
+        if text.startswith("/reject "):
+            return self._reject(user_id, text[8:].strip())
+        if text.startswith("/proposal "):
+            return self._proposal(user_id, text[10:].strip())
         return _HELP
 
     def _recall(self, query: str) -> str:
@@ -120,6 +144,72 @@ class TelegramService:
             return f"Task: {envelope.task_id}\nProvider: {provider}\n\n{result.output}"
         return f"Task failed ({provider}):\n{result.error}"
 
+    def _propose(self, user_id: int, request: str) -> str:
+        if self.repo is None:
+            return "Write proposals are disabled: start the bot with --repo."
+        provider, separator, objective = request.partition(" ")
+        if not separator or provider != "codex":
+            return "Usage: /propose codex <objective>"
+        with ApprovalStore(self.approvals_path) as store:
+            approval = store.create(
+                user_id=user_id,
+                provider=provider,
+                objective=objective,
+                repo=self.repo,
+            )
+        return (
+            f"Proposal: {approval.id}\nRepo: {approval.repo}\n"
+            f"Expires: {approval.expires_at}\nTask: {approval.objective}\n\n"
+            f"Run: /approve {approval.id}\nReject: /reject {approval.id}"
+        )
+
+    def _approve(self, user_id: int, approval_id: str) -> str:
+        if not approval_id:
+            return "Usage: /approve <proposal-id>"
+        approval = None
+        try:
+            with ApprovalStore(self.approvals_path) as store:
+                approval = store.claim(approval_id, user_id)
+                execution = CodexWorktreeExecutor().execute(approval)
+                store.finish(
+                    approval.id,
+                    success=execution.success,
+                    worktree=execution.worktree,
+                    result=execution.output,
+                )
+        except Exception as exc:
+            if approval is not None and approval.status == "running":
+                with ApprovalStore(self.approvals_path) as store:
+                    try:
+                        store.finish(approval.id, success=False, result=str(exc))
+                    except ValueError:
+                        pass
+            return f"Proposal failed safely: {exc}"
+        return (
+            f"Proposal {approval.id}: {'completed' if execution.success else 'failed'}\n"
+            f"Branch: {execution.branch}\nWorktree: {execution.worktree}\n"
+            f"Status:\n{execution.status or '(clean)'}\n"
+            f"Diff:\n{execution.diff_stat or '(no diff)'}\n\n{execution.output}"
+        )
+
+    def _reject(self, user_id: int, approval_id: str) -> str:
+        if not approval_id:
+            return "Usage: /reject <proposal-id>"
+        with ApprovalStore(self.approvals_path) as store:
+            approval = store.reject(approval_id, user_id)
+        return f"Proposal {approval.id}: rejected"
+
+    def _proposal(self, user_id: int, approval_id: str) -> str:
+        with ApprovalStore(self.approvals_path) as store:
+            approval = store.get(approval_id)
+        if not approval or approval.user_id != user_id:
+            return "Proposal not found."
+        return (
+            f"Proposal: {approval.id}\nStatus: {approval.status}\n"
+            f"Repo: {approval.repo}\nTask: {approval.objective}\n"
+            f"Worktree: {approval.worktree or '-'}"
+        )
+
 
 def run_bot(
     vault: str | Path,
@@ -127,10 +217,11 @@ def run_bot(
     token: str,
     project: str,
     users: set[int],
+    repo: str | Path | None = None,
     once: bool = False,
 ) -> None:
     client = TelegramClient(token)
-    service = TelegramService(vault, project, users)
+    service = TelegramService(vault, project, users, repo=repo)
     offset = None
     while True:
         for update in client.updates(offset):

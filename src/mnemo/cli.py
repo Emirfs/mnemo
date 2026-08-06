@@ -120,6 +120,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--users",
         help="comma-separated Telegram user ids (else $MNEMO_TELEGRAM_USERS)",
     )
+    stg.add_argument("--repo", help="Git repository allowed for approved worktree writes")
     stg.add_argument("--once", action="store_true", help="poll once, then exit")
 
     sd = sub.add_parser("daily", help="append an entry to today's daily note")
@@ -311,6 +312,7 @@ def main(argv: list[str] | None = None) -> int:
             token=token,
             project=args.project,
             users=users,
+            repo=args.repo,
             once=args.once,
         )
         return 0
