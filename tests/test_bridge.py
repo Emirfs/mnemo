@@ -53,7 +53,29 @@ def test_research_mode_enables_bounded_web_tools(provider):
         assert "--auto-approve" in command
         assert "bash" not in command
     else:
-        assert command[-2:] == ["--agent", "plan"]
+        assert "--agent" not in command
+
+
+def test_opencode_research_injects_fail_closed_permissions(monkeypatch):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured.update(kwargs)
+        output = json.dumps({"type": "text", "part": {"text": "safe answer"}})
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr(bridge, "_executable", lambda name: "opencode.exe")
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    result = bridge.run_bridge(
+        "opencode", TaskEnvelope("research", None, mode="research")
+    )
+
+    config = json.loads(captured["env"]["OPENCODE_CONFIG_CONTENT"])
+    permissions = config["permission"]
+    assert result.success
+    assert permissions["websearch"] == "allow"
+    assert permissions["webfetch"] == "allow"
+    assert permissions["read"] == permissions["bash"] == permissions["edit"] == "deny"
 
 
 @pytest.mark.parametrize(
@@ -106,6 +128,9 @@ def test_bridge_uses_read_only_flags_and_stdin(monkeypatch, provider):
     else:
         assert captured["input"] is None
         assert "analyze" in captured["command"][-1]
+        if provider == "opencode":
+            assert "Complete the objective in" in captured["command"][-1]
+            assert "\n" not in captured["command"][-1]
     assert captured["cwd"] == "C:/safe"
     command = captured["command"]
     if provider == "claude":
