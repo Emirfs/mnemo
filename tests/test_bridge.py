@@ -25,21 +25,24 @@ def test_envelope_marks_content_untrusted():
 
     prompt = envelope.prompt()
 
-    assert "untrusted data" in prompt
+    assert "untrusted input" in prompt
     assert "read-only specialist" in prompt
+    assert "Complete the objective" in prompt
     assert "mem-1" in prompt
     assert "inferred" in prompt
 
 
-@pytest.mark.parametrize("provider", ["claude", "codex", "gemini"])
+@pytest.mark.parametrize(
+    "provider", ["antigravity", "claude", "codex", "gemini", "omp", "opencode"]
+)
 def test_bridge_uses_read_only_flags_and_stdin(monkeypatch, provider):
     captured = {}
 
     def fake_run(command, **kwargs):
         captured["command"] = command
         captured.update(kwargs)
-        output = (
-            json.dumps(
+        if provider == "claude":
+            output = json.dumps(
                 {
                     "structured_output": {
                         "answer": "safe answer",
@@ -49,9 +52,20 @@ def test_bridge_uses_read_only_flags_and_stdin(monkeypatch, provider):
                     }
                 }
             )
-            if provider == "claude"
-            else "safe answer"
-        )
+        elif provider == "omp":
+            output = json.dumps(
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "safe answer"}],
+                    },
+                }
+            )
+        elif provider == "opencode":
+            output = json.dumps({"type": "text", "part": {"text": "safe answer"}})
+        else:
+            output = "safe answer"
         return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
 
     monkeypatch.setattr(bridge, "_executable", lambda name: f"{name}.exe")
@@ -62,8 +76,12 @@ def test_bridge_uses_read_only_flags_and_stdin(monkeypatch, provider):
 
     assert result.success is True
     assert result.output == "safe answer"
-    assert "analyze" in captured["input"]
-    assert "analyze" not in captured["command"]
+    if provider in {"claude", "codex", "gemini"}:
+        assert "analyze" in captured["input"]
+        assert "analyze" not in captured["command"]
+    else:
+        assert captured["input"] is None
+        assert "analyze" in captured["command"][-1]
     assert captured["cwd"] == "C:/safe"
     command = captured["command"]
     if provider == "claude":
@@ -71,6 +89,12 @@ def test_bridge_uses_read_only_flags_and_stdin(monkeypatch, provider):
         assert "--json-schema" in command
     elif provider == "codex":
         assert "read-only" in command and "never" in command
+    elif provider == "antigravity":
+        assert "plan" in command and "--sandbox" in command
+    elif provider == "omp":
+        assert "--no-tools" in command and "--no-session" in command
+    elif provider == "opencode":
+        assert "--pure" in command and "--auto" not in command
     else:
         assert "plan" in command
 

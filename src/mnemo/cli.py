@@ -107,7 +107,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sds.add_argument("--dry-run", action="store_true", help="print candidate without writing")
 
     sbr = sub.add_parser("bridge", help="send a read-only task envelope to an AI CLI")
-    sbr.add_argument("provider", choices=("claude", "codex", "gemini"))
+    sbr.add_argument(
+        "provider",
+        choices=("antigravity", "claude", "codex", "gemini", "omp", "opencode"),
+    )
     sbr.add_argument("objective")
     sbr.add_argument("--project", help="override project (else detected)")
     sbr.add_argument("--project-dir", help="dir to detect project from (default: cwd)")

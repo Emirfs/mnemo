@@ -20,7 +20,7 @@ _CHUNK = 3_500
 _HELP = """Mnemo read-only bot
 /status
 /recall <query>
-/ask <claude|codex|gemini> <objective>
+/ask <antigravity|claude|codex|omp|opencode> <objective>
 /propose codex <objective>
 /approve <proposal-id>
 /reject <proposal-id>
@@ -132,8 +132,9 @@ class TelegramService:
 
     def _ask(self, request: str) -> str:
         provider, separator, objective = request.partition(" ")
-        if not separator or provider not in {"claude", "codex", "gemini"}:
-            return "Usage: /ask <claude|codex|gemini> <objective>"
+        providers = {"antigravity", "claude", "codex", "omp", "opencode"}
+        if not separator or provider not in providers:
+            return "Usage: /ask <antigravity|claude|codex|omp|opencode> <objective>"
         with Index(self.cfg.index_path) as index:
             index.reindex(self.cfg.vault)
             envelope = build_envelope(index, objective, self.project)
