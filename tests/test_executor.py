@@ -62,6 +62,7 @@ def test_executor_creates_isolated_worktree(monkeypatch, tmp_path: Path):
     assert result.success is True
     assert "file.txt" in result.status
     assert "file.txt" in result.diff_stat
+    assert "+after" in result.diff
     assert (repo / "file.txt").read_text(encoding="utf-8") == "before\n"
     assert (Path(result.worktree) / "file.txt").read_text(encoding="utf-8") == "after\n"
 

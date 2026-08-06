@@ -115,9 +115,15 @@ def test_proposal_requires_second_approval(monkeypatch, tmp_path: Path):
                 output="implemented",
                 status=" M file.txt",
                 diff_stat="file.txt | 1 +",
+                diff="-before\n+after",
             )
 
     monkeypatch.setattr("mnemo.telegram.CodexWorktreeExecutor", FakeExecutor)
+    monkeypatch.setattr(
+        service,
+        "_review_and_distill",
+        lambda approval, execution: ("reviewed", "draft memory-1"),
+    )
     response = service.handle(12, f"/approve {approval_id}")
     assert "completed" in response
     assert "file.txt" in response
@@ -133,3 +139,19 @@ def test_proposal_can_be_rejected(tmp_path: Path):
     approval_id = proposal.splitlines()[0].split(": ", 1)[1]
     assert "rejected" in service.handle(12, f"/reject {approval_id}")
     assert "Status: rejected" in service.handle(12, f"/proposal {approval_id}")
+
+
+def test_flow_analyzes_before_creating_proposal(monkeypatch, tmp_path: Path):
+    service = TelegramService(tmp_path / "vault", "p", {12}, repo=tmp_path)
+    monkeypatch.setattr(
+        "mnemo.telegram.run_bridge",
+        lambda provider, envelope, workdir: BridgeResult(
+            provider=provider, success=True, output="safe implementation plan"
+        ),
+    )
+
+    response = service.handle(12, "/flow add a safe feature")
+
+    assert "Claude analysis" in response
+    assert "safe implementation plan" in response
+    assert "/approve" in response

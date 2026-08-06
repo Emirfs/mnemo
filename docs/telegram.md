@@ -9,12 +9,17 @@ The Telegram front-end is deliberately read-only. It exposes only:
 - `/approve <proposal-id>`
 - `/reject <proposal-id>`
 - `/proposal <proposal-id>`
+- `/flow <objective>`
 - `/help`
 
 External AI analysis uses the isolated bridge policy described in `bridge.md`.
 Write proposals expire after 15 minutes, are bound to the proposing Telegram
 user, and can run only once. Approved Codex work runs in a new temporary Git
 worktree and branch. It never merges, commits, pushes, or changes the main worktree.
+
+`/flow` runs the complete guarded chain: Claude read-only analysis, phone
+proposal, approved Codex worktree implementation, Claude diff review, then a
+Qwen `draft + inferred` memory candidate. Verification and merge remain manual.
 
 ## Setup
 

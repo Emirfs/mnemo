@@ -14,6 +14,8 @@ from .config import Config
 from .context import build_context
 from .executor import CodexWorktreeExecutor
 from .index import Index
+from .librarian import distill
+from .writer import write_note
 
 _MAX_INPUT = 8_000
 _CHUNK = 3_500
@@ -25,6 +27,7 @@ _HELP = """Mnemo read-only bot
 /approve <proposal-id>
 /reject <proposal-id>
 /proposal <proposal-id>
+/flow <objective>
 /help
 
 Writes require a second, one-time /approve and run only in an isolated Git worktree.
@@ -121,6 +124,8 @@ class TelegramService:
             return self._reject(user_id, text[8:].strip())
         if text.startswith("/proposal "):
             return self._proposal(user_id, text[10:].strip())
+        if text.startswith("/flow "):
+            return self._flow(user_id, text[6:].strip())
         return _HELP
 
     def _recall(self, query: str) -> str:
@@ -155,18 +160,38 @@ class TelegramService:
         provider, separator, objective = request.partition(" ")
         if not separator or provider != "codex":
             return "Usage: /propose codex <objective>"
+        return self._create_proposal(user_id, provider, objective)
+
+    def _create_proposal(self, user_id: int, provider: str, objective: str) -> str:
         with ApprovalStore(self.approvals_path) as store:
             approval = store.create(
-                user_id=user_id,
-                provider=provider,
-                objective=objective,
-                repo=self.repo,
+                user_id=user_id, provider=provider, objective=objective, repo=self.repo
             )
         return (
             f"Proposal: {approval.id}\nRepo: {approval.repo}\n"
             f"Expires: {approval.expires_at}\nTask: {approval.objective}\n\n"
             f"Run: /approve {approval.id}\nReject: /reject {approval.id}"
         )
+
+    def _flow(self, user_id: int, objective: str) -> str:
+        if self.repo is None:
+            return "Workflow writes are disabled: start the bot with --repo."
+        if not objective:
+            return "Usage: /flow <objective>"
+        with Index(self.cfg.index_path) as index:
+            index.reindex(self.cfg.vault)
+            envelope = build_envelope(index, objective, self.project)
+        isolated = Path(tempfile.gettempdir()) / "mnemo-bridge"
+        isolated.mkdir(parents=True, exist_ok=True)
+        analysis = run_bridge("claude", envelope, workdir=isolated)
+        if not analysis.success:
+            return f"Workflow analysis failed:\n{analysis.error}"
+        implementation = (
+            f"User objective:\n{objective[:4_000]}\n\n"
+            f"Read-only Claude analysis:\n{analysis.output[:3_500]}"
+        )
+        proposal = self._create_proposal(user_id, "codex", implementation)
+        return f"Claude analysis:\n{analysis.output}\n\n{proposal}"
 
     def _approve(self, user_id: int, approval_id: str) -> str:
         if not approval_id:
@@ -190,12 +215,61 @@ class TelegramService:
                     except ValueError:
                         pass
             return f"Proposal failed safely: {exc}"
+        try:
+            review, draft = self._review_and_distill(approval, execution)
+        except Exception as exc:
+            review, draft = f"failed safely: {exc}", "not attempted"
         return (
             f"Proposal {approval.id}: {'completed' if execution.success else 'failed'}\n"
             f"Branch: {execution.branch}\nWorktree: {execution.worktree}\n"
             f"Status:\n{execution.status or '(clean)'}\n"
-            f"Diff:\n{execution.diff_stat or '(no diff)'}\n\n{execution.output}"
+            f"Diff:\n{execution.diff_stat or '(no diff)'}\n\n{execution.output}\n\n"
+            f"Claude review:\n{review}\n\nQwen memory: {draft}"
         )
+
+    def _review_and_distill(self, approval, execution) -> tuple[str, str]:
+        review_objective = (
+            "Review this approved Codex worktree change for bugs, security issues, "
+            "regressions, and missing tests. Do not suggest running commands.\n\n"
+            f"Task:\n{approval.objective[:4_000]}\n\n"
+            f"Status:\n{execution.status[:2_000]}\n\n"
+            f"Diff:\n{execution.diff[:10_000]}"
+        )
+        with Index(self.cfg.index_path) as index:
+            index.reindex(self.cfg.vault)
+            envelope = build_envelope(index, review_objective, self.project)
+        isolated = Path(tempfile.gettempdir()) / "mnemo-bridge"
+        review_result = run_bridge("claude", envelope, workdir=isolated)
+        review = review_result.output if review_result.success else f"failed: {review_result.error}"
+        transcript = (
+            f"Approved task:\n{approval.objective[:3_000]}\n\n"
+            f"Codex result:\n{execution.output[:4_000]}\n\n"
+            f"Diff stat:\n{execution.diff_stat[:2_000]}\n\n"
+            f"Claude review:\n{review[:5_000]}"
+        )
+        try:
+            candidate = distill(transcript)
+            if not candidate["remember"]:
+                return review, "no durable memory proposed"
+            with Index(self.cfg.index_path) as index:
+                index.reindex(self.cfg.vault)
+                note = write_note(
+                    self.cfg,
+                    index,
+                    type=candidate["type"],
+                    title=candidate["title"],
+                    summary=candidate["summary"],
+                    body=candidate["body"],
+                    project=self.project,
+                    tags=candidate["tags"],
+                    supersedes=candidate["supersedes"],
+                    status="draft",
+                    verification="inferred",
+                    sources=[f"approval:{approval.id}"],
+                )
+            return review, f"draft {note['id']}"
+        except Exception as exc:
+            return review, f"draft failed safely: {exc}"
 
     def _reject(self, user_id: int, approval_id: str) -> str:
         if not approval_id:

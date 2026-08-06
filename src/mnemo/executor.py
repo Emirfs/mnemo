@@ -21,6 +21,7 @@ class ExecutionResult:
     output: str
     status: str
     diff_stat: str
+    diff: str
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -104,6 +105,7 @@ class CodexWorktreeExecutor:
         proc = self._codex(worktree, prompt)
         status = self._git(worktree, "status", "--short")
         diff_stat = self._git(worktree, "diff", "--stat")
+        diff = self._git(worktree, "diff", "--no-ext-diff")
         output = proc.stdout if proc.returncode == 0 else proc.stderr
         return ExecutionResult(
             success=proc.returncode == 0,
@@ -112,4 +114,5 @@ class CodexWorktreeExecutor:
             output=_bounded(output),
             status=_bounded(status.stdout),
             diff_stat=_bounded(diff_stat.stdout),
+            diff=_bounded(diff.stdout),
         )
