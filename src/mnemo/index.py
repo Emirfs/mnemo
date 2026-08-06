@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS notes (
     created  TEXT,
     updated  TEXT,
     status   TEXT,
+    verification TEXT,
+    sources  TEXT,
     body     TEXT
 );
 
@@ -112,6 +114,10 @@ class Index:
         cols = {r["name"] for r in self.con.execute("PRAGMA table_info(notes)")}
         if "status" not in cols:
             self.con.execute("ALTER TABLE notes ADD COLUMN status TEXT")
+        if "verification" not in cols:
+            self.con.execute("ALTER TABLE notes ADD COLUMN verification TEXT")
+        if "sources" not in cols:
+            self.con.execute("ALTER TABLE notes ADD COLUMN sources TEXT")
 
     def _enable_vectors(self) -> None:
         try:
@@ -160,12 +166,14 @@ class Index:
         self.con.execute(
             """INSERT INTO notes
                (id, path, mtime, hash, type, project, title, summary, tags,
-                created, updated, status, body)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 created, updated, status, verification, sources, body)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 note.id, rel, mtime, h, note.type, note.project, note.title,
                 note.summary, json.dumps(note.tags, ensure_ascii=False),
-                note.created, note.updated, note.status or "active", note.body,
+                note.created, note.updated, note.status or "active",
+                note.verification or "unknown",
+                json.dumps(note.sources, ensure_ascii=False), note.body,
             ),
         )
         self.con.execute(

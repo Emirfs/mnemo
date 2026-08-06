@@ -87,11 +87,12 @@ def build_server(vault: str | None = None, project: str | None = None):
         links: list[str] | None = None,
         supersedes: list[str] | None = None,
     ) -> dict:
-        """Add or update a memory note. Deduped by title within the same
+        """Add or update an inferred draft. Drafts stay out of retrieval until
+        a human verifies evidence with the CLI. Deduped by title within the same
         type/project (an equivalent title updates in place, not a duplicate).
         type: decision | lesson | daily | project | reference | note | profile.
         Pass `supersedes` with ids this note replaces — those are marked stale
-        and drop out of recall, so newer facts win over older contradictory ones."""
+        and drop out of recall after this draft is verified."""
         idx = _open()
         try:
             return write_note(
@@ -99,6 +100,7 @@ def build_server(vault: str | None = None, project: str | None = None):
                 type=type, title=title, summary=summary, body=body,
                 project=_project(project),
                 tags=tags, links=links, supersedes=supersedes,
+                status="draft", verification="inferred",
             )
         finally:
             idx.close()

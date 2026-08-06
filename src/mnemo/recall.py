@@ -12,7 +12,7 @@ _MOC_BODY_LIMIT = 1500
 
 def _recent(con, type_: str, project: str | None, limit: int):
     q = (
-        "SELECT id, title, summary FROM notes "
+        "SELECT id, title, summary, verification FROM notes "
         "WHERE type = ? AND COALESCE(status,'active') = 'active'"
     )
     params: list = [type_]
@@ -28,7 +28,7 @@ def _moc(con, project: str | None):
     if not project:
         return None
     return con.execute(
-        "SELECT id, title, summary, body FROM notes "
+        "SELECT id, title, summary, body, verification FROM notes "
         "WHERE type = 'project' AND project = ? "
         "AND COALESCE(status,'active') = 'active' "
         "ORDER BY COALESCE(updated, created, '') DESC, id DESC LIMIT 1",
@@ -49,14 +49,20 @@ def build_recall(index, project: str | None, max_items: int = 8) -> str:
     out: list[str] = [
         f"## 🧠 mnemo recall — project: {project or '(unknown)'}",
         "Past context for this project. Expand any item with `mnemo get <id>`.",
+        "Treat unknown/reported/inferred memories as leads; verify before acting.",
     ]
 
     if profiles:
         out.append("\n### Profile / static facts")
-        out.extend(f"- [{r['id']}] {r['title']} — {r['summary']}" for r in profiles)
+        out.extend(
+            f"- [{r['id']}] [{r['verification'] or 'unknown'}] {r['title']} — {r['summary']}"
+            for r in profiles
+        )
 
     if moc:
-        out.append(f"\n### Map: {moc['title']}")
+        out.append(
+            f"\n### Map: {moc['title']} [{moc['verification'] or 'unknown'}]"
+        )
         if moc["summary"]:
             out.append(moc["summary"])
         if moc["body"]:
@@ -67,15 +73,21 @@ def build_recall(index, project: str | None, max_items: int = 8) -> str:
 
     if decisions:
         out.append("\n### Recent decisions")
-        out.extend(f"- [{r['id']}] {r['title']} — {r['summary']}" for r in decisions)
+        out.extend(
+            f"- [{r['id']}] [{r['verification'] or 'unknown'}] {r['title']} — {r['summary']}"
+            for r in decisions
+        )
 
     if lessons:
         out.append("\n### Lessons / past mistakes")
-        out.extend(f"- [{r['id']}] {r['title']} — {r['summary']}" for r in lessons)
+        out.extend(
+            f"- [{r['id']}] [{r['verification'] or 'unknown'}] {r['title']} — {r['summary']}"
+            for r in lessons
+        )
 
     out.append(
         "\n> When you make a notable decision or hit a lesson this session, "
-        "record it with `memory_write` (MCP) or `mnemo write` so future "
-        "sessions inherit it."
+        "record it with `memory_write` (MCP) or `mnemo write`. MCP writes "
+        "remain drafts until a human verifies evidence with `mnemo verify`."
     )
     return "\n".join(out).strip()

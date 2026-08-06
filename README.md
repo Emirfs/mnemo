@@ -244,6 +244,9 @@ project: stm32-rf-ota
 tags: [rf, protocol, stm32]
 summary: Devices update one at a time, not concurrently — prevents system lockup.
 links: [20260623-rf-uid-identity]
+status: active
+verification: verified
+sources: [commit:abc123, test:pytest]
 ---
 
 Sequential update: id1 finishes, id2 begins. All devices don't drop into the
@@ -259,6 +262,7 @@ token discipline comes from. (No `summary` = bad note. The fish judges you. 🐠
 |---|---|
 | `init` / `sync` / `clone` | manage the vault as a private git repo |
 | `write` / `daily` | add notes (deduped; `--supersedes <id>` retires older ones) / append journal entries |
+| `verify` | attach evidence and promote an AI draft into active retrieval |
 | `search` / `get` | hybrid search (summaries) / fetch one full note |
 | `context` | compact query-time context pack (recency-weighted, profile-pinned) |
 | `bench` | score retrieval quality (hit-rate / MRR / recall) against a cases file |
@@ -278,6 +282,14 @@ architecture and roadmap.
 - **F4** — portability: `init` / `sync` / `clone` / `export` / `import`
 - **F5** — semantic hybrid search (fastembed + sqlite-vec, RRF), content dedup, `daily` journaling
 - **F6** — `.mnemo-project` marker for shared cross-repo project memory
+
+MCP writes are saved as `draft + inferred`, not trusted facts. They stay out of
+retrieval until a human attaches evidence:
+
+```bash
+mnemo --vault "~/my-memory" verify <id> \
+  --sources "commit:abc123,test:pytest"
+```
 
 ## 🔒 Privacy
 

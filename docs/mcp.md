@@ -11,10 +11,14 @@ Cursor, …) as callable tools. This is the *pull* side; the SessionStart hook
 | `memory_search(query, type?, project?, k=5)` | summaries + ids + paths (no bodies) |
 | `memory_get(id)` | one full note (with body) |
 | `memory_moc(project)` | the recall map: MOC + recent decisions/lessons |
-| `memory_write(type, title, summary?, body?, project?, tags?, links?)` | create/update (deduped) |
+| `memory_write(type, title, summary?, body?, project?, tags?, links?)` | create/update draft (deduped) |
 
 `memory_search` deliberately omits bodies — the model expands only what it needs
 with `memory_get`, keeping token cost flat as the vault grows.
+
+`memory_write` is intentionally draft-only. AI-created notes are stored with
+`status: draft` and `verification: inferred`, so they cannot enter retrieval as
+facts. A human promotes one with `mnemo verify <id> --sources <evidence>`.
 
 ## Install (requires the `mcp` extra)
 

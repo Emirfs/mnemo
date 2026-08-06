@@ -49,8 +49,9 @@ Why it stays clean:
 
 - **Gated:** fires only when code changed **and** tests aren't failing.
 - **Once per session:** blocks at most one turn (`nudged` + `stop_hook_active`).
-- **Model is the filter:** it writes the summary itself (free, in context) or
-  replies `NOMEM` if nothing's worth keeping. `mnemo write` also dedups by title.
+- **Model proposes, human verifies:** MCP writes become deduped drafts and stay
+  outside retrieval until `mnemo verify <id> --sources <evidence>` promotes them.
+  The model can still reply `NOMEM` when nothing is worth keeping.
 
 Per-session state lives in a small JSON file under the OS temp dir
 (`mnemo-autosave/<session_id>.json`).

@@ -52,7 +52,8 @@ class Search:
         for nid, score in fused:
             n = self.con.execute(
                 "SELECT id, type, project, title, summary, path, tags, "
-                "created, updated, status FROM notes WHERE id = ?",
+                "created, updated, status, verification, sources "
+                "FROM notes WHERE id = ?",
                 (nid,),
             ).fetchone()
             if n is None:
@@ -69,6 +70,8 @@ class Search:
                     "tags": ntags,
                     "created": n["created"],
                     "updated": n["updated"],
+                    "verification": n["verification"] or "unknown",
+                    "sources": json.loads(n["sources"] or "[]"),
                     "score": round(score, 5),
                 }
             )

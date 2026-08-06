@@ -12,7 +12,7 @@ from mnemo.context import build_context
 from mnemo.index import Index
 from mnemo.recall import build_recall
 from mnemo.search import Search
-from mnemo.writer import write_note
+from mnemo.writer import verify_note, write_note
 
 
 def write_md(vault: Path, rel: str, fm: str, body: str = "body") -> Path:
@@ -171,3 +171,101 @@ def test_ephemeral_note_expires_from_context(tmp_path: Path):
     ids = [i["id"] for i in pack["items"]]
     assert "fresh-note" in ids
     assert "old-note" not in ids
+
+
+def test_draft_requires_evidence_before_retrieval(tmp_path: Path):
+    vault = tmp_path / "v"
+    vault.mkdir()
+    cfg = Config(vault)
+    idx = Index(cfg.index_path)
+    try:
+        draft = write_note(
+            cfg,
+            idx,
+            type="lesson",
+            title="AI inferred lesson",
+            summary="anchor candidate",
+            project="proj-a",
+            status="draft",
+            verification="inferred",
+        )
+        assert Search(idx).search("anchor", project="proj-a") == []
+
+        verified = verify_note(
+            cfg, idx, draft["id"], ["commit:abc123", "test:pytest"]
+        )
+
+        assert verified["status"] == "active"
+        assert verified["verification"] == "verified"
+        hits = Search(idx).search("anchor", project="proj-a")
+        assert [hit["id"] for hit in hits] == [draft["id"]]
+        assert hits[0]["sources"] == ["commit:abc123", "test:pytest"]
+    finally:
+        idx.close()
+
+
+def test_verified_write_requires_source(tmp_path: Path):
+    cfg = Config(tmp_path)
+    idx = Index(cfg.index_path)
+    try:
+        try:
+            write_note(
+                cfg,
+                idx,
+                type="decision",
+                title="Unsupported claim",
+                verification="verified",
+            )
+        except ValueError as exc:
+            assert "require at least one source" in str(exc)
+        else:
+            raise AssertionError("verified write accepted without evidence")
+    finally:
+        idx.close()
+
+
+def test_draft_defers_supersession_until_verified(tmp_path: Path):
+    cfg = Config(tmp_path)
+    idx = Index(cfg.index_path)
+    try:
+        old = write_note(
+            cfg, idx, type="decision", title="Old fact",
+            summary="active anchor", id="old-fact",
+        )
+        draft = write_note(
+            cfg, idx, type="decision", title="Replacement fact",
+            summary="replacement anchor", status="draft",
+            verification="inferred", supersedes=[old["id"]],
+        )
+
+        assert Search(idx).get(old["id"])["status"] == "active"
+        assert draft["pending_supersedes"] == [old["id"]]
+
+        result = verify_note(cfg, idx, draft["id"], ["test:confirmed"])
+
+        assert result["superseded"] == [old["id"]]
+        assert Search(idx).get(old["id"])["status"] == "superseded"
+    finally:
+        idx.close()
+
+
+def test_draft_cannot_overwrite_active_note_during_dedup(tmp_path: Path):
+    cfg = Config(tmp_path)
+    idx = Index(cfg.index_path)
+    try:
+        active = write_note(
+            cfg, idx, type="decision", title="Stable decision",
+            summary="verified behavior", id="stable",
+        )
+        draft = write_note(
+            cfg, idx, type="decision", title="Stable decision",
+            summary="AI proposes different behavior", status="draft",
+            verification="inferred",
+        )
+
+        assert draft["id"] != active["id"]
+        assert Search(idx).get(active["id"])["status"] == "active"
+        assert Search(idx).get(active["id"])["summary"] == "verified behavior"
+        assert Search(idx).get(draft["id"])["status"] == "draft"
+    finally:
+        idx.close()

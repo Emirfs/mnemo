@@ -18,7 +18,7 @@ from .index import Index
 from .recall import build_recall
 from .search import Search
 from .vault import detect_project
-from .writer import write_note
+from .writer import verify_note, write_note
 
 
 def _csv(value: str) -> list[str]:
@@ -85,6 +85,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="comma-separated ids this note replaces (they're hidden from recall)",
     )
     sw.add_argument("--id")
+    sw.add_argument("--draft", action="store_true", help="store outside retrieval pending verification")
+    sw.add_argument(
+        "--verification",
+        choices=("unknown", "reported", "inferred", "verified"),
+        default="unknown",
+    )
+    sw.add_argument("--sources", default="", help="comma-separated evidence references")
+
+    svf = sub.add_parser("verify", help="activate a draft with evidence")
+    svf.add_argument("id")
+    svf.add_argument("--sources", required=True, help="comma-separated evidence references")
 
     sd = sub.add_parser("daily", help="append an entry to today's daily note")
     sd.add_argument("text", nargs="?", help="entry text; omitted/'-' reads stdin")
@@ -186,6 +197,9 @@ def _cmd_write(args, cfg, idx) -> None:
         tags=_csv(args.tags),
         links=_csv(args.links),
         supersedes=_csv(args.supersedes),
+        status="draft" if args.draft else "active",
+        verification=args.verification,
+        sources=_csv(args.sources),
         id=args.id,
     )
     print(json.dumps(result, ensure_ascii=False))
@@ -264,7 +278,10 @@ def main(argv: list[str] | None = None) -> int:
                     print("(no matches)")
                 for r in res:
                     proj = r["project"] or "-"
-                    print(f"[{r['score']}] {r['title']}  ({r['type']}/{proj})")
+                    print(
+                        f"[{r['score']}] {r['title']}  "
+                        f"({r['type']}/{proj}, {r['verification']})"
+                    )
                     if r["summary"]:
                         print(f"    {r['summary']}")
                     print(f"    {r['path']}")
@@ -279,6 +296,9 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_bench(args, cfg, idx)
         elif args.cmd == "write":
             _cmd_write(args, cfg, idx)
+        elif args.cmd == "verify":
+            result = verify_note(cfg, idx, args.id, _csv(args.sources))
+            print(json.dumps(result, ensure_ascii=False))
         elif args.cmd == "daily":
             from .daily import append_daily
             text = args.text

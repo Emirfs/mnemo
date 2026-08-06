@@ -49,6 +49,8 @@ def test_scoped_server_applies_default_project_to_write(tmp_path: Path):
 
     note = next(tmp_path.rglob("*.md")).read_text(encoding="utf-8")
     assert "project: shared" in note
+    assert "status: draft" in note
+    assert "verification: inferred" in note
 
 
 def test_scoped_server_rejects_conflicting_project(tmp_path: Path):

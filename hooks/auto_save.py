@@ -113,7 +113,8 @@ _REASON = (
     "durable takeaway — a decision (why we chose X over Y), a lesson/gotcha, or "
     "a key reference — via the memory_write tool (or `mnemo write`). Rules: "
     "summary-only (1-2 sentences), set the project, pick type decision|lesson|"
-    "reference, and prefer `supersedes` if it overrides an older note. Do NOT "
+    "reference. MCP writes are drafts until a human verifies evidence; include "
+    "`supersedes` only when the relationship is explicit. Do NOT "
     "save file lists, routine edits, or anything re-derivable from the code. If "
     "nothing is worth remembering, reply with exactly NOMEM and stop."
 )

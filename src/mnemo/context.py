@@ -10,6 +10,7 @@ retrieval — no LLM on the hot path.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 
 from .search import Search
 
@@ -66,26 +67,38 @@ def _item(row: dict, *, score: float | None = None) -> dict:
         "path": row["path"],
         "created": row.get("created"),
         "updated": row.get("updated"),
+        "verification": row.get("verification") or "unknown",
+        "sources": row.get("sources") or [],
         "score": row.get("score") if score is None else score,
     }
 
 
 def _public(item: dict) -> dict:
     """The JSON-facing shape: drop the internal date fields used for ranking."""
-    return {k: item[k] for k in ("id", "type", "title", "summary", "path", "score")}
+    return {
+        k: item[k]
+        for k in (
+            "id", "type", "title", "summary", "path", "verification", "sources", "score"
+        )
+    }
 
 
 def _project_moc(index, project: str | None) -> dict | None:
     if not project:
         return None
     row = index.con.execute(
-        "SELECT id, type, title, summary, path, created, updated FROM notes "
+        "SELECT id, type, title, summary, path, created, updated, "
+        "verification, sources FROM notes "
         "WHERE type = 'project' AND project = ? "
         "AND COALESCE(status,'active') = 'active' "
         "ORDER BY COALESCE(updated, created, '') DESC, id DESC LIMIT 1",
         (project,),
     ).fetchone()
-    return _item(dict(row), score=1.0) if row else None
+    if not row:
+        return None
+    data = dict(row)
+    data["sources"] = json.loads(data["sources"] or "[]")
+    return _item(data, score=1.0)
 
 
 def _profiles(index, project: str | None) -> list[dict]:
@@ -94,23 +107,34 @@ def _profiles(index, project: str | None) -> list[dict]:
     Global profiles (no project) plus any scoped to the current project.
     """
     rows = index.con.execute(
-        "SELECT id, type, title, summary, path, created, updated FROM notes "
+        "SELECT id, type, title, summary, path, created, updated, "
+        "verification, sources FROM notes "
         "WHERE type = 'profile' AND COALESCE(status,'active') = 'active' "
         "AND (project IS NULL OR project = ?) "
         "ORDER BY COALESCE(updated, created, '') DESC, id DESC LIMIT ?",
         (project, _MAX_PROFILES),
     ).fetchall()
-    return [_item(dict(r), score=1.0) for r in rows]
+    items = []
+    for row in rows:
+        data = dict(row)
+        data["sources"] = json.loads(data["sources"] or "[]")
+        items.append(_item(data, score=1.0))
+    return items
 
 
 def _render_item(item: dict) -> str:
     score = item["score"]
     score_text = "" if score is None else f", score {score}"
     summary = item["summary"] or "(no summary)"
+    trust = item["verification"]
+    source_text = ""
+    if item["sources"]:
+        source_text = f"\n  Sources: {', '.join(item['sources'])}"
     return (
-        f"- [{item['id']}] {item['title']} ({item['type']}{score_text})\n"
+        f"- [{item['id']}] {item['title']} "
+        f"({item['type']}, verification {trust}{score_text})\n"
         f"  {summary}\n"
-        f"  {item['path']}"
+        f"  {item['path']}{source_text}"
     )
 
 
@@ -121,6 +145,7 @@ def _render_markdown(
         f"## mnemo context — project: {project or '(unknown)'}",
         f"Query: {query}",
         "Hint: summaries only; expand details with `mnemo get <id>`.",
+        "Trust: unknown/reported/inferred memories are leads, not verified facts.",
     ]
     kept: list[dict] = []
     lines = header[:]
