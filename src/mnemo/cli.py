@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from .config import Config
@@ -104,6 +105,14 @@ def _build_parser() -> argparse.ArgumentParser:
     sds.add_argument("--source", required=True, help="provenance label for the session text")
     sds.add_argument("--model", default="qwen3:4b")
     sds.add_argument("--dry-run", action="store_true", help="print candidate without writing")
+
+    sbr = sub.add_parser("bridge", help="send a read-only task envelope to an AI CLI")
+    sbr.add_argument("provider", choices=("claude", "codex", "gemini"))
+    sbr.add_argument("objective")
+    sbr.add_argument("--project", help="override project (else detected)")
+    sbr.add_argument("--project-dir", help="dir to detect project from (default: cwd)")
+    sbr.add_argument("-k", type=int, default=5)
+    sbr.add_argument("--timeout", type=int, default=180)
 
     sd = sub.add_parser("daily", help="append an entry to today's daily note")
     sd.add_argument("text", nargs="?", help="entry text; omitted/'-' reads stdin")
@@ -242,6 +251,29 @@ def _cmd_distill(args, cfg, idx) -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+def _cmd_bridge(args, idx) -> None:
+    from .bridge import build_envelope, run_bridge
+
+    project_dir = args.project_dir or os.getcwd()
+    project = args.project or detect_project(project_dir)
+    envelope = build_envelope(idx, args.objective, project, k=args.k)
+    isolated = Path(tempfile.gettempdir()) / "mnemo-bridge"
+    isolated.mkdir(parents=True, exist_ok=True)
+    result = run_bridge(
+        args.provider,
+        envelope,
+        timeout=args.timeout,
+        workdir=isolated,
+    )
+    print(
+        json.dumps(
+            {"task": envelope.to_dict(), "result": result.to_dict()},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
 def _force_utf8() -> None:
     # Hooks, piped note bodies, and non-ASCII (Turkish) text must not crash or
     # mojibake on Windows cp1252. stdin matters for `write`/`daily --body -`.
@@ -296,7 +328,9 @@ def main(argv: list[str] | None = None) -> int:
     # Semantic (embedding) index for search/reindex/write/context; FTS-only
     # fast path for recall/daily/get so SessionStart never loads the model.
     emb = None
-    if args.cmd in ("reindex", "search", "write", "distill", "context", "bench"):
+    if args.cmd in (
+        "reindex", "search", "write", "distill", "bridge", "context", "bench"
+    ):
         from .embed import Embedder
         if Embedder.is_available():
             emb = Embedder()
@@ -338,6 +372,8 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, ensure_ascii=False))
         elif args.cmd == "distill":
             _cmd_distill(args, cfg, idx)
+        elif args.cmd == "bridge":
+            _cmd_bridge(args, idx)
         elif args.cmd == "daily":
             from .daily import append_daily
             text = args.text
