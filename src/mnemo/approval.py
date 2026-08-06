@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS approvals (
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     worktree TEXT,
-    result TEXT
+    result TEXT,
+    operation TEXT NOT NULL DEFAULT 'execute',
+    target_id TEXT
 );
 """
 
@@ -36,6 +38,8 @@ class Approval:
     expires_at: str
     worktree: str | None = None
     result: str | None = None
+    operation: str = "execute"
+    target_id: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -48,6 +52,13 @@ class ApprovalStore:
         self.con = sqlite3.connect(str(self.path))
         self.con.row_factory = sqlite3.Row
         self.con.executescript(_SCHEMA)
+        columns = {row["name"] for row in self.con.execute("PRAGMA table_info(approvals)")}
+        if "operation" not in columns:
+            self.con.execute(
+                "ALTER TABLE approvals ADD COLUMN operation TEXT NOT NULL DEFAULT 'execute'"
+            )
+        if "target_id" not in columns:
+            self.con.execute("ALTER TABLE approvals ADD COLUMN target_id TEXT")
 
     def close(self) -> None:
         self.con.close()
@@ -66,12 +77,18 @@ class ApprovalStore:
         objective: str,
         repo: str | Path,
         ttl_minutes: int = 15,
+        operation: str = "execute",
+        target_id: str | None = None,
     ) -> Approval:
         provider = provider.strip().lower()
         objective = objective.strip()
         repo = str(Path(repo).resolve())
-        if provider != "codex":
+        if operation not in {"execute", "merge"}:
+            raise ValueError("unsupported approval operation")
+        if operation == "execute" and provider != "codex":
             raise ValueError("write proposals currently support only codex")
+        if operation == "merge" and (provider != "git" or not target_id):
+            raise ValueError("merge approvals require git provider and target id")
         if not objective or len(objective) > 8_000:
             raise ValueError("proposal objective must contain 1..8000 characters")
         if ttl_minutes < 1 or ttl_minutes > 60:
@@ -86,9 +103,14 @@ class ApprovalStore:
             status="pending",
             created_at=now.isoformat(),
             expires_at=(now + dt.timedelta(minutes=ttl_minutes)).isoformat(),
+            operation=operation,
+            target_id=target_id,
         )
         self.con.execute(
-            "INSERT INTO approvals VALUES (?,?,?,?,?,?,?,?,?,?)",
+            """INSERT INTO approvals
+               (id,user_id,provider,objective,repo,status,created_at,expires_at,
+                worktree,result,operation,target_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 approval.id,
                 approval.user_id,
@@ -100,6 +122,8 @@ class ApprovalStore:
                 approval.expires_at,
                 approval.worktree,
                 approval.result,
+                approval.operation,
+                approval.target_id,
             ),
         )
         self.con.commit()

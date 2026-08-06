@@ -84,3 +84,25 @@ def test_only_codex_write_proposals_are_allowed(tmp_path: Path):
                 objective="Task",
                 repo=tmp_path,
             )
+
+
+def test_merge_approval_requires_target(tmp_path: Path):
+    with ApprovalStore(tmp_path / "approvals.sqlite") as store:
+        with pytest.raises(ValueError, match="target id"):
+            store.create(
+                user_id=12,
+                provider="git",
+                objective="Merge",
+                repo=tmp_path,
+                operation="merge",
+            )
+        approval = store.create(
+            user_id=12,
+            provider="git",
+            objective="Merge",
+            repo=tmp_path,
+            operation="merge",
+            target_id="source-1",
+        )
+        assert approval.operation == "merge"
+        assert approval.target_id == "source-1"

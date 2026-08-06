@@ -13,6 +13,7 @@ The Telegram front-end is deliberately read-only. It exposes only:
 - `/diff <proposal-id>`
 - `/patch <proposal-id>`
 - `/distill <session text>`
+- `/merge <completed-proposal-id>`
 - `/help`
 
 External AI analysis uses the isolated bridge policy described in `bridge.md`.
@@ -27,6 +28,11 @@ Qwen `draft + inferred` memory candidate. Verification and merge remain manual.
 Proposal messages include inline **Approve** and **Reject** buttons. `/diff`
 returns bounded text; `/patch` downloads the complete Git patch. `/distill`
 uses local Qwen to create a draft-only memory and cannot activate it.
+
+`/merge` creates a second one-time approval. After approval, Mnemo verifies the
+binary patch with `git apply --check` and applies it to a clean main worktree.
+Changes remain uncommitted and are never pushed. New files are included through
+Git intent-to-add in the task worktree.
 
 ## Setup
 

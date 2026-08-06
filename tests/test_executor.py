@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from mnemo.approval import ApprovalStore
-from mnemo.executor import CodexWorktreeExecutor
+from mnemo.executor import CodexWorktreeExecutor, MergeExecutor
 
 
 def _git(repo: Path, *args: str):
@@ -86,3 +87,32 @@ def test_executor_requires_claimed_approval(tmp_path: Path):
         executor = CodexWorktreeExecutor(tmp_path / "worktrees")
         with pytest.raises(ValueError, match="running Codex approval"):
             executor.execute(approval)
+
+
+def test_merge_executor_applies_worktree_patch(monkeypatch, tmp_path: Path):
+    repo = _repo(tmp_path)
+    store, source = _claimed(tmp_path, repo)
+    executor = CodexWorktreeExecutor(Path(tempfile.gettempdir()) / "mnemo-worktrees")
+
+    def fake_codex(worktree, prompt):
+        (worktree / "file.txt").write_text("after\n", encoding="utf-8")
+        return subprocess.CompletedProcess([], 0, stdout="implemented", stderr="")
+
+    monkeypatch.setattr(executor, "_codex", fake_codex)
+    result = executor.execute(source)
+    source = store.finish(source.id, success=True, worktree=result.worktree)
+    merge = store.create(
+        user_id=12,
+        provider="git",
+        objective="Apply patch",
+        repo=repo,
+        operation="merge",
+        target_id=source.id,
+    )
+    merge = store.claim(merge.id, 12)
+
+    message = MergeExecutor().execute(merge, source)
+    store.close()
+
+    assert "uncommitted" in message
+    assert (repo / "file.txt").read_text(encoding="utf-8") == "after\n"

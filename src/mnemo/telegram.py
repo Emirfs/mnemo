@@ -15,7 +15,7 @@ from .approval import ApprovalStore
 from .bridge import build_envelope, run_bridge
 from .config import Config
 from .context import build_context
-from .executor import CodexWorktreeExecutor
+from .executor import CodexWorktreeExecutor, MergeExecutor
 from .index import Index
 from .librarian import distill
 from .writer import write_note
@@ -34,10 +34,11 @@ _HELP = """Mnemo read-only bot
 /diff <proposal-id>
 /patch <proposal-id>
 /distill <session text>
+/merge <completed-proposal-id>
 /help
 
 Writes require a second, one-time /approve and run only in an isolated Git worktree.
-No merge, push, delete, verify, or memory-write commands are exposed."""
+No automatic merge, push, delete, verify, or active memory-write is exposed."""
 
 
 @dataclass
@@ -181,6 +182,8 @@ class TelegramService:
             return self._diff(user_id, text[7:].strip(), download=True)
         if text.startswith("/distill "):
             return self._distill(user_id, text[9:].strip())
+        if text.startswith("/merge "):
+            return self._merge(user_id, text[7:].strip())
         return _HELP
 
     def _recall(self, query: str) -> str:
@@ -266,6 +269,11 @@ class TelegramService:
         try:
             with ApprovalStore(self.approvals_path) as store:
                 approval = store.claim(approval_id, user_id)
+                if approval.operation == "merge":
+                    source = store.get(approval.target_id)
+                    message = MergeExecutor().execute(approval, source)
+                    store.finish(approval.id, success=True, result=message)
+                    return f"Merge {approval.id}: completed\n{message}"
                 execution = CodexWorktreeExecutor().execute(approval)
                 store.finish(
                     approval.id,
@@ -420,6 +428,35 @@ class TelegramService:
             return f"Qwen draft: {note['id']}\n{candidate['summary']}"
         except Exception as exc:
             return f"Distill failed safely: {exc}"
+
+    def _merge(self, user_id: int, source_id: str) -> str | TelegramReply:
+        try:
+            source = self._owned_approval(user_id, source_id)
+        except ValueError:
+            return "Proposal not found."
+        if source.status != "completed" or not source.worktree:
+            return "Only a completed worktree proposal can be merged."
+        with ApprovalStore(self.approvals_path) as store:
+            approval = store.create(
+                user_id=user_id,
+                provider="git",
+                objective=f"Apply approved worktree patch from {source.id}",
+                repo=source.repo,
+                operation="merge",
+                target_id=source.id,
+            )
+        return TelegramReply(
+            text=(
+                f"Merge proposal: {approval.id}\nSource: {source.id}\n"
+                "This applies the reviewed patch to the main worktree without commit."
+            ),
+            buttons=[
+                [
+                    {"text": "Apply patch", "callback_data": f"approve:{approval.id}"},
+                    {"text": "Reject", "callback_data": f"reject:{approval.id}"},
+                ]
+            ],
+        )
 
 
 def run_bot(

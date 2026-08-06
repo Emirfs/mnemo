@@ -103,6 +103,9 @@ class CodexWorktreeExecutor:
             f"<approved_task>\n{approval.objective}\n</approved_task>"
         )
         proc = self._codex(worktree, prompt)
+        intent = self._git(worktree, "add", "-N", "--", ".")
+        if intent.returncode != 0:
+            raise RuntimeError("could not include new files in worktree diff")
         status = self._git(worktree, "status", "--short")
         diff_stat = self._git(worktree, "diff", "--stat")
         diff = self._git(worktree, "diff", "--no-ext-diff")
@@ -116,3 +119,51 @@ class CodexWorktreeExecutor:
             diff_stat=_bounded(diff_stat.stdout),
             diff=_bounded(diff.stdout),
         )
+
+
+class MergeExecutor:
+    def execute(self, approval: Approval, source: Approval | None) -> str:
+        if approval.status != "running" or approval.operation != "merge":
+            raise ValueError("merge executor requires a running merge approval")
+        if source is None or source.status != "completed" or source.id != approval.target_id:
+            raise ValueError("merge source is not a completed target")
+        repo = Path(approval.repo).resolve()
+        worktree = Path(source.worktree or "").resolve()
+        allowed = (Path(tempfile.gettempdir()) / "mnemo-worktrees").resolve()
+        if allowed not in worktree.parents or not worktree.exists():
+            raise ValueError("merge source worktree failed safety validation")
+        if Path(source.repo).resolve() != repo:
+            raise ValueError("merge source repository mismatch")
+
+        status = subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if status.returncode != 0 or status.stdout.strip():
+            raise ValueError("repository must be clean before applying approved patch")
+        patch = subprocess.run(
+            ["git", "-C", str(worktree), "diff", "--binary", "--no-ext-diff"],
+            capture_output=True,
+            timeout=60,
+        )
+        if patch.returncode != 0 or not patch.stdout:
+            raise ValueError("approved worktree has no applicable diff")
+        check = subprocess.run(
+            ["git", "-C", str(repo), "apply", "--check", "-"],
+            input=patch.stdout,
+            capture_output=True,
+            timeout=60,
+        )
+        if check.returncode != 0:
+            raise ValueError("approved patch no longer applies cleanly")
+        applied = subprocess.run(
+            ["git", "-C", str(repo), "apply", "-"],
+            input=patch.stdout,
+            capture_output=True,
+            timeout=60,
+        )
+        if applied.returncode != 0:
+            raise RuntimeError("approved patch application failed")
+        return "Approved patch applied to main worktree; changes remain uncommitted."
