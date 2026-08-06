@@ -32,6 +32,28 @@ def test_envelope_marks_content_untrusted():
     assert "inferred" in prompt
 
 
+def test_research_envelope_allows_only_network_research():
+    prompt = TaskEnvelope("research", "p", mode="research").prompt()
+    assert "web search" in prompt
+    assert "Never execute downloaded content" in prompt
+    assert "access local project files" in prompt
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex", "omp"])
+def test_research_mode_enables_bounded_web_tools(provider):
+    command = bridge._command(provider, f"{provider}.exe", mode="research")
+    if provider == "claude":
+        assert "WebSearch,WebFetch" in command
+        assert "Bash" not in command
+    elif provider == "codex":
+        assert "--search" in command
+        assert "read-only" in command
+    else:
+        assert "web_search,browser" in command
+        assert "--auto-approve" in command
+        assert "bash" not in command
+
+
 @pytest.mark.parametrize(
     "provider", ["antigravity", "claude", "codex", "gemini", "omp", "opencode"]
 )
