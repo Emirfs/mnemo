@@ -48,6 +48,11 @@ CREATE INDEX IF NOT EXISTS idx_notes_project ON notes(project);
 """
 
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
+_QUERY_STOP_WORDS = {
+    "a", "an", "and", "are", "for", "how", "is", "of", "or", "the", "to", "what", "why",
+    "bir", "bu", "da", "de", "ile", "icin", "için", "mi", "mu", "mı", "mü",
+    "nasıl", "ne", "neden", "nicin", "niçin", "o", "su", "şu", "ve", "veya",
+}
 
 
 def _hash(text: str) -> str:
@@ -60,6 +65,23 @@ def fts_query(text: str) -> str:
     if not terms:
         return '""'
     return " OR ".join(f'"{t}"*' for t in terms)
+
+
+def _query_terms(text: str) -> list[str]:
+    return [
+        term.casefold()
+        for term in _WORD_RE.findall(text)
+        if len(term) >= 2 and term.casefold() not in _QUERY_STOP_WORDS
+    ]
+
+
+def _enough_term_coverage(query: str, text: str) -> bool:
+    terms = _query_terms(query)
+    if len(terms) < 4:
+        return True
+    words = {word.casefold() for word in _WORD_RE.findall(text)}
+    matched = sum(any(word.startswith(term) for word in words) for term in set(terms))
+    return matched >= 2
 
 
 class Index:
@@ -241,15 +263,31 @@ class Index:
                 f"WHERE json_each.value IN ({placeholders}))"
             )
             params.extend(tags)
-        params.append(limit)
+        candidate_limit = limit * 4
+        params.append(candidate_limit)
         rows = self.con.execute(
-            f"""SELECT notes_fts.id, bm25(notes_fts) AS rank
+            f"""SELECT notes_fts.id, n.title, n.summary, n.body, n.tags,
+                       bm25(notes_fts) AS rank
                 FROM notes_fts JOIN notes AS n ON n.id = notes_fts.id
                 WHERE {' AND '.join(clauses)}
                 ORDER BY rank LIMIT ?""",
             params,
         ).fetchall()
-        return [r["id"] for r in rows]
+        return [
+            r["id"]
+            for r in rows
+            if _enough_term_coverage(
+                query,
+                "\n".join(
+                    (
+                        r["title"] or "",
+                        r["summary"] or "",
+                        r["body"] or "",
+                        r["tags"] or "",
+                    )
+                ),
+            )
+        ][:limit]
 
     def vec_search(self, query: str, limit: int) -> list[tuple[str, float]] | None:
         """KNN over the vector store. Returns (id, cosine_distance) or None

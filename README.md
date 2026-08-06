@@ -14,7 +14,7 @@ with **push-based auto-recall** so the model remembers your past work *without b
 [![Python](https://img.shields.io/badge/python-3.10+-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-7c3aed)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](#license)
-[![Tests](https://img.shields.io/badge/tests-28%20passing-22c55e.svg)](#status)
+[![Tests](https://img.shields.io/badge/tests-passing-22c55e.svg)](#status)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-ff8a3d.svg)](#contributing)
 [![Vibe](https://img.shields.io/badge/just%20keep-swimming-1e90ff.svg)](#)
 
@@ -269,7 +269,7 @@ token discipline comes from. (No `summary` = bad note. The fish judges you. 🐠
 
 ## 📊 Status
 
-Working. **F1–F6 shipped, 28 tests green.** ✅ See [`DESIGN.md`](./DESIGN.md) for
+Working. **F1–F6 shipped, test suite green.** ✅ See [`DESIGN.md`](./DESIGN.md) for
 architecture and roadmap.
 
 - **F1** — core: markdown/frontmatter parse, FTS5, incremental index
