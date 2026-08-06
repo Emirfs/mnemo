@@ -114,6 +114,14 @@ def _build_parser() -> argparse.ArgumentParser:
     sbr.add_argument("-k", type=int, default=5)
     sbr.add_argument("--timeout", type=int, default=180)
 
+    stg = sub.add_parser("telegram", help="run the allowlisted read-only Telegram bot")
+    stg.add_argument("--project", required=True)
+    stg.add_argument(
+        "--users",
+        help="comma-separated Telegram user ids (else $MNEMO_TELEGRAM_USERS)",
+    )
+    stg.add_argument("--once", action="store_true", help="poll once, then exit")
+
     sd = sub.add_parser("daily", help="append an entry to today's daily note")
     sd.add_argument("text", nargs="?", help="entry text; omitted/'-' reads stdin")
 
@@ -291,6 +299,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "serve":
         from .server import run as serve
         serve(args.vault, project=args.project)
+        return 0
+
+    if args.cmd == "telegram":
+        from .telegram import parse_users, run_bot
+
+        token = os.environ.get("MNEMO_TELEGRAM_TOKEN", "")
+        users = parse_users(args.users or os.environ.get("MNEMO_TELEGRAM_USERS", ""))
+        run_bot(
+            Config(args.vault).vault,
+            token=token,
+            project=args.project,
+            users=users,
+            once=args.once,
+        )
         return 0
 
     if args.cmd == "project":

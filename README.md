@@ -265,6 +265,7 @@ token discipline comes from. (No `summary` = bad note. The fish judges you. 🐠
 | `verify` | attach evidence and promote an AI draft into active retrieval |
 | `distill` | ask a local Ollama model for one draft-only durable memory |
 | `bridge` | send an isolated read-only task envelope to Claude, Codex, or Gemini |
+| `telegram` | run an allowlisted read-only phone front-end |
 | `search` / `get` | hybrid search (summaries) / fetch one full note |
 | `context` | compact query-time context pack (recency-weighted, profile-pinned) |
 | `bench` | score retrieval quality (hit-rate / MRR / recall) against a cases file |
@@ -295,6 +296,7 @@ mnemo --vault "~/my-memory" verify <id> \
 
 Optional local librarian: [`docs/librarian.md`](./docs/librarian.md).
 Multi-AI handoff: [`docs/bridge.md`](./docs/bridge.md).
+Telegram front-end: [`docs/telegram.md`](./docs/telegram.md).
 
 ## 🔒 Privacy
 
