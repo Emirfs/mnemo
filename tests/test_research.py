@@ -149,3 +149,15 @@ def test_source_verifier_rejects_private_addresses(monkeypatch):
 
     assert not verified
     assert detail == "non-public address"
+
+
+def test_cancelled_session_cannot_be_claimed(tmp_path):
+    store = ResearchStore(tmp_path / "db")
+    engine = ResearchEngine(_Index(), store)
+    session_id = engine.create("topic", 1)
+    assert store.cancel(session_id, 1)
+
+    result = engine.run(session_id)
+
+    assert result["status"] == "cancelled"
+    assert store.contributions(session_id) == []

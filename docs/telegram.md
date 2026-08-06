@@ -13,6 +13,11 @@ The Telegram front-end is deliberately read-only. It exposes only:
 - `/diff <proposal-id>`
 - `/patch <proposal-id>`
 - `/distill <session text>`
+- `/research <topic>`
+- `/research-answer <id> <answers>`
+- `/research-status <id>`
+- `/research-result <id>`
+- `/research-cancel <id>`
 - `/merge <completed-proposal-id>`
 - `/repos`
 - `/use <route-alias>`
@@ -32,6 +37,18 @@ Qwen `draft + inferred` memory candidate. Verification and merge remain manual.
 Proposal messages include inline **Approve** and **Reject** buttons. `/diff`
 returns bounded text; `/patch` downloads the complete Git patch. `/distill`
 uses local Qwen to create a draft-only memory and cannot activate it.
+
+`/research` starts a persistent background session without blocking Telegram
+polling. Local Qwen asks up to three questions only when critical scope is
+missing. Five isolated providers then research in parallel and perform at most
+two cross-critique rounds. Session deadline is 15 minutes; each provider gets
+one attempt per round. Models cannot extend deadline or round count.
+
+Research providers may access public web sources but cannot access project
+files, vault files, shell tools, write tools, or credentials. Cited URLs are
+checked separately; private and loopback addresses are rejected. Final reports
+distinguish verified from unverified sources and remain available through
+`/research-result`. Bot also sends report when background session finishes.
 
 `/merge` creates a second one-time approval. After approval, Mnemo verifies the
 binary patch with `git apply --check` and applies it to a clean main worktree.

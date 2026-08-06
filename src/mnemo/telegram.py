@@ -6,6 +6,7 @@ import json
 import secrets
 import subprocess
 import tempfile
+import threading
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from .executor import CodexWorktreeExecutor, MergeExecutor
 from .feedback import FeedbackStore
 from .index import Index
 from .librarian import distill
+from .research import ResearchEngine, ResearchStore, clarify_topic
 from .writer import write_note
 
 _MAX_INPUT = 8_000
@@ -35,6 +37,11 @@ _HELP = """Mnemo read-only bot
 /diff <proposal-id>
 /patch <proposal-id>
 /distill <session text>
+/research <topic>
+/research-answer <id> <answers>
+/research-status <id>
+/research-result <id>
+/research-cancel <id>
 /merge <completed-proposal-id>
 /feedback <task-id> <good|bad> [note]
 /feedback-stats
@@ -163,6 +170,7 @@ class TelegramService:
         users: set[int],
         repo: str | Path | None = None,
         routes: dict[str, RepoRoute] | None = None,
+        notifier=None,
     ):
         if not project.strip():
             raise ValueError("Telegram bot requires an explicit project")
@@ -176,6 +184,9 @@ class TelegramService:
         self.selected: dict[int, str] = {}
         self.approvals_path = self.cfg.index_path.with_name("approvals.sqlite")
         self.feedback_path = self.cfg.index_path.with_name("feedback.sqlite")
+        self.research_path = self.cfg.index_path.with_name("research.sqlite")
+        self.notifier = notifier
+        ResearchStore(self.research_path).recover_interrupted()
 
     def _scope(self, user_id: int) -> RepoRoute:
         alias = self.selected.get(user_id) or next(iter(self.routes))
@@ -245,6 +256,16 @@ class TelegramService:
             return self._diff(user_id, text[7:].strip(), download=True)
         if text.startswith("/distill "):
             return self._distill(user_id, text[9:].strip())
+        if text.startswith("/research-answer "):
+            return self._research_answer(user_id, text[17:].strip())
+        if text.startswith("/research-status "):
+            return self._research_status(user_id, text[17:].strip())
+        if text.startswith("/research-result "):
+            return self._research_result(user_id, text[17:].strip())
+        if text.startswith("/research-cancel "):
+            return self._research_cancel(user_id, text[17:].strip())
+        if text.startswith("/research "):
+            return self._research(user_id, text[10:].strip())
         if text.startswith("/merge "):
             return self._merge(user_id, text[7:].strip())
         return _HELP
@@ -515,6 +536,102 @@ class TelegramService:
         except Exception as exc:
             return f"Distill failed safely: {exc}"
 
+    def _research(self, user_id: int, topic: str) -> str:
+        if not topic:
+            return "Usage: /research <topic>"
+        try:
+            questions = clarify_topic(topic)
+        except Exception:
+            questions = []
+        scope = self._scope(user_id)
+        session_id = ResearchStore(self.research_path).create(
+            topic, user_id, scope.project, 900, questions
+        )
+        if questions:
+            rendered = "\n".join(
+                f"{number}. {question}"
+                for number, question in enumerate(questions, 1)
+            )
+            return (
+                f"Research {session_id} needs clarification:\n{rendered}\n\n"
+                f"Reply: /research-answer {session_id} <answers>"
+            )
+        self._start_research(session_id)
+        return f"Research started: {session_id}\nCheck: /research-status {session_id}"
+
+    def _research_answer(self, user_id: int, request: str) -> str:
+        session_id, separator, answers = request.partition(" ")
+        if not separator:
+            return "Usage: /research-answer <id> <answers>"
+        if not ResearchStore(self.research_path).answer(session_id, user_id, answers):
+            return "Research session not found or not waiting for your answer."
+        self._start_research(session_id)
+        return f"Research resumed: {session_id}"
+
+    def _owned_research(self, user_id: int, session_id: str) -> dict | None:
+        session = ResearchStore(self.research_path).get(session_id)
+        if not session or session["user_id"] != user_id:
+            return None
+        return session
+
+    def _research_status(self, user_id: int, session_id: str) -> str:
+        session = self._owned_research(user_id, session_id)
+        if not session:
+            return "Research session not found."
+        contributions = ResearchStore(self.research_path).contributions(session_id)
+        successful = sum(item["success"] for item in contributions)
+        return (
+            f"Research: {session_id}\nStatus: {session['status']}\n"
+            f"Round: {session['round']}/2\n"
+            f"Providers: {successful}/{len(contributions)} successful"
+        )
+
+    def _research_result(self, user_id: int, session_id: str) -> str:
+        session = self._owned_research(user_id, session_id)
+        if not session:
+            return "Research session not found."
+        if session["status"] not in {"completed", "partial", "failed"}:
+            return f"Research {session_id} is {session['status']}."
+        if session["report"]:
+            return f"Research {session_id} ({session['status']}):\n\n{session['report']}"
+        return f"Research {session_id} failed safely: {session['error'] or 'no report'}"
+
+    def _research_cancel(self, user_id: int, session_id: str) -> str:
+        if ResearchStore(self.research_path).cancel(session_id, user_id):
+            return f"Research cancelled: {session_id}"
+        return "Research session not found or already finished."
+
+    def _start_research(self, session_id: str):
+        threading.Thread(
+            target=self._run_research,
+            args=(session_id,),
+            daemon=True,
+            name=f"mnemo-research-{session_id}",
+        ).start()
+
+    def _run_research(self, session_id: str):
+        store = ResearchStore(self.research_path)
+        try:
+            with Index(self.cfg.index_path) as index:
+                index.reindex(self.cfg.vault)
+                result = ResearchEngine(index, store).run(session_id)
+        except Exception as exc:
+            store.update(session_id, status="failed", error=str(exc))
+            result = store.get(session_id)
+        if not self.notifier:
+            return
+        if result.get("report"):
+            message = f"Research {session_id} ({result['status']}):\n\n{result['report']}"
+        else:
+            message = (
+                f"Research {session_id} {result['status']}: "
+                f"{result.get('error') or 'no report'}"
+            )
+        try:
+            self.notifier(result["user_id"], message)
+        except Exception:
+            pass
+
     def _merge(self, user_id: int, source_id: str) -> str | TelegramReply:
         try:
             source = self._owned_approval(user_id, source_id)
@@ -568,7 +685,14 @@ def run_bot(
     once: bool = False,
 ) -> None:
     client = TelegramClient(token)
-    service = TelegramService(vault, project, users, repo=repo, routes=routes)
+    service = TelegramService(
+        vault,
+        project,
+        users,
+        repo=repo,
+        routes=routes,
+        notifier=lambda user_id, text: client.send(user_id, text),
+    )
     offset = None
     while True:
         for update in client.updates(offset):

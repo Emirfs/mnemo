@@ -7,6 +7,7 @@ import pytest
 from mnemo.approval import ApprovalStore
 from mnemo.bridge import BridgeResult
 from mnemo.executor import ExecutionResult
+from mnemo.research import ResearchStore
 from mnemo.telegram import (
     TelegramClient,
     TelegramReply,
@@ -217,3 +218,78 @@ def test_multi_repo_routes_scope_recall(tmp_path: Path):
     assert "Route selected: beta" in service.handle(12, "/use beta")
     assert "safe-decision" not in service.handle(12, "/recall anchor")
     assert "alpha" in service.handle(12, "/repos")
+
+
+def test_research_waits_for_clarification(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(
+        "mnemo.telegram.clarify_topic", lambda topic: ["Which market?", "What timeframe?"]
+    )
+    service = TelegramService(tmp_path / "vault", "p", {12, 99})
+    started = []
+    monkeypatch.setattr(service, "_start_research", started.append)
+
+    response = service.handle(12, "/research compare databases")
+    session_id = response.split()[1]
+
+    assert "Which market?" in response
+    assert started == []
+    assert "not found" in service.handle(99, f"/research-status {session_id}").lower()
+    assert "not waiting" in service.handle(
+        99, f"/research-answer {session_id} Europe, 2026"
+    ).lower()
+    assert "resumed" in service.handle(
+        12, f"/research-answer {session_id} Europe, 2026"
+    ).lower()
+    assert started == [session_id]
+
+
+def test_research_starts_without_questions(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("mnemo.telegram.clarify_topic", lambda topic: [])
+    service = TelegramService(tmp_path / "vault", "p", {12})
+    started = []
+    monkeypatch.setattr(service, "_start_research", started.append)
+
+    response = service.handle(12, "/research current database landscape")
+
+    assert "Research started" in response
+    assert len(started) == 1
+    assert "queued" in service.handle(12, f"/research-status {started[0]}")
+
+
+def test_research_result_and_cancel_enforce_owner(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("mnemo.telegram.clarify_topic", lambda topic: [])
+    service = TelegramService(tmp_path / "vault", "p", {12, 13})
+    monkeypatch.setattr(service, "_start_research", lambda session_id: None)
+    response = service.handle(12, "/research topic")
+    session_id = response.split()[2]
+
+    assert service.handle(13, f"/research-result {session_id}") == "Research session not found."
+    assert "cancelled" in service.handle(12, f"/research-cancel {session_id}")
+
+
+def test_research_completion_notifies_user(monkeypatch, tmp_path: Path):
+    notifications = []
+    service = TelegramService(
+        tmp_path / "vault", "p", {12}, notifier=lambda *args: notifications.append(args)
+    )
+    session_id = ResearchStore(service.research_path).create("topic", 12, "p", 900)
+
+    class FakeEngine:
+        def __init__(self, index, store):
+            pass
+
+        def run(self, research_id):
+            return {
+                "id": research_id,
+                "user_id": 12,
+                "status": "completed",
+                "report": "final report",
+                "error": None,
+            }
+
+    monkeypatch.setattr("mnemo.telegram.ResearchEngine", FakeEngine)
+    service._run_research(session_id)
+
+    assert notifications == [
+        (12, f"Research {session_id} (completed):\n\nfinal report")
+    ]

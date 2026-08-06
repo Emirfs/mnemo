@@ -188,6 +188,15 @@ class ResearchStore:
             )
         return cursor.rowcount == 1
 
+    def claim(self, session_id: str, deadline: float) -> bool:
+        with self._connect() as db:
+            cursor = db.execute(
+                "UPDATE research_sessions SET status='running', deadline=?, error=NULL "
+                "WHERE id=? AND status='queued'",
+                (deadline, session_id),
+            )
+        return cursor.rowcount == 1
+
     def recover_interrupted(self):
         with self._connect() as db:
             db.execute(
@@ -315,11 +324,10 @@ class ResearchEngine:
             raise ValueError("research session not found")
         if session["status"] == "waiting_input":
             raise ValueError("research session requires clarification")
-        if session["status"] == "cancelled":
-            return session
         deadline = time.time() + self.duration
-        self.store.update(session_id, status="running", deadline=deadline, error=None)
-        session["deadline"] = deadline
+        if not self.store.claim(session_id, deadline):
+            return self.store.get(session_id)
+        session = self.store.get(session_id)
         try:
             self._run_initial(session)
             for round_ in range(1, self.rounds + 1):
