@@ -124,6 +124,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="comma-separated Telegram user ids (else $MNEMO_TELEGRAM_USERS)",
     )
     stg.add_argument("--repo", help="Git repository allowed for approved worktree writes")
+    stg.add_argument("--repos", help="JSON file containing multiple Telegram repo routes")
     stg.add_argument("--once", action="store_true", help="poll once, then exit")
 
     sd = sub.add_parser("daily", help="append an entry to today's daily note")
@@ -306,7 +307,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "telegram":
-        from .telegram import parse_users, run_bot
+        from .telegram import load_routes, parse_users, run_bot
 
         token = os.environ.get("MNEMO_TELEGRAM_TOKEN", "")
         users = parse_users(args.users or os.environ.get("MNEMO_TELEGRAM_USERS", ""))
@@ -316,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
             project=args.project,
             users=users,
             repo=args.repo,
+            routes=load_routes(args.repos) if args.repos else None,
             once=args.once,
         )
         return 0

@@ -10,6 +10,7 @@ from mnemo.executor import ExecutionResult
 from mnemo.telegram import (
     TelegramClient,
     TelegramReply,
+    RepoRoute,
     TelegramService,
     chunks,
     parse_users,
@@ -198,3 +199,19 @@ def test_patch_rejects_untrusted_worktree_path(tmp_path: Path):
         store.finish(approval_id, success=True, worktree=tmp_path / "outside")
     response = service.handle(12, f"/patch {approval_id}")
     assert "failed safety validation" in response
+
+
+def test_multi_repo_routes_scope_recall(tmp_path: Path):
+    vault = tmp_path / "vault"
+    _write_note(vault)
+    routes = {
+        "alpha": RepoRoute("alpha", "p", tmp_path / "alpha"),
+        "beta": RepoRoute("beta", "other", tmp_path / "beta"),
+    }
+    service = TelegramService(vault, "fallback", {12}, routes=routes)
+
+    assert "alpha" in service.handle(12, "/status")
+    assert "safe-decision" in service.handle(12, "/recall anchor")
+    assert "Route selected: beta" in service.handle(12, "/use beta")
+    assert "safe-decision" not in service.handle(12, "/recall anchor")
+    assert "alpha" in service.handle(12, "/repos")

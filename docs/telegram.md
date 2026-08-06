@@ -14,6 +14,8 @@ The Telegram front-end is deliberately read-only. It exposes only:
 - `/patch <proposal-id>`
 - `/distill <session text>`
 - `/merge <completed-proposal-id>`
+- `/repos`
+- `/use <route-alias>`
 - `/help`
 
 External AI analysis uses the isolated bridge policy described in `bridge.md`.
@@ -33,6 +35,18 @@ uses local Qwen to create a draft-only memory and cannot activate it.
 binary patch with `git apply --check` and applies it to a clean main worktree.
 Changes remain uncommitted and are never pushed. New files are included through
 Git intent-to-add in the task worktree.
+
+For multiple repositories, pass `--repos routes.json`:
+
+```json
+{
+  "mnemo": {"project": "mnemo", "repo": "C:/Projects/mnemo"},
+  "stpm-fc": {"project": "stm32-rf-ota", "repo": "C:/Projects/STPM_FC_BOOTLOADER"}
+}
+```
+
+Use `/repos` and `/use stpm-fc` to switch scope. Every proposal stores the
+resolved repository path, so later route changes cannot redirect an approval.
 
 ## Setup
 

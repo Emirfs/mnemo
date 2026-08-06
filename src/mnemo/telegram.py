@@ -48,6 +48,26 @@ class TelegramReply:
     document: Path | None = None
 
 
+@dataclass(frozen=True)
+class RepoRoute:
+    alias: str
+    project: str
+    repo: Path | None
+
+
+def load_routes(path: str | Path) -> dict[str, RepoRoute]:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not data:
+        raise ValueError("Telegram routes file must contain a non-empty object")
+    routes = {}
+    for alias, value in data.items():
+        if not isinstance(value, dict) or not value.get("project"):
+            raise ValueError(f"invalid Telegram route: {alias}")
+        repo = Path(value["repo"]).expanduser().resolve() if value.get("repo") else None
+        routes[alias] = RepoRoute(alias=alias, project=str(value["project"]), repo=repo)
+    return routes
+
+
 def parse_users(value: str) -> set[int]:
     users = set()
     for part in value.split(","):
@@ -139,6 +159,7 @@ class TelegramService:
         project: str,
         users: set[int],
         repo: str | Path | None = None,
+        routes: dict[str, RepoRoute] | None = None,
     ):
         if not project.strip():
             raise ValueError("Telegram bot requires an explicit project")
@@ -146,7 +167,22 @@ class TelegramService:
         self.project = project.strip()
         self.users = users
         self.repo = Path(repo).resolve() if repo else None
+        self.routes = routes or {
+            "default": RepoRoute("default", self.project, self.repo)
+        }
+        self.selected: dict[int, str] = {}
         self.approvals_path = self.cfg.index_path.with_name("approvals.sqlite")
+
+    def _scope(self, user_id: int) -> RepoRoute:
+        alias = self.selected.get(user_id) or next(iter(self.routes))
+        return self.routes[alias]
+
+    def _project_for_repo(self, repo: str) -> str:
+        resolved = Path(repo).resolve()
+        for route in self.routes.values():
+            if route.repo and route.repo == resolved:
+                return route.project
+        return self.project
 
     def handle(self, user_id: int, text: str) -> str | TelegramReply | None:
         if user_id not in self.users:
@@ -157,15 +193,29 @@ class TelegramService:
         if text in {"/start", "/help"}:
             return _HELP
         if text == "/status":
-            mode = "approval-gated worktree" if self.repo else "read-only"
+            scope = self._scope(user_id)
+            mode = "approval-gated worktree" if scope.repo else "read-only"
             return (
-                f"Mnemo online\nProject: {self.project}\nMode: {mode}\n"
+                f"Mnemo online\nRoute: {scope.alias}\nProject: {scope.project}\n"
+                f"Repo: {scope.repo or '-'}\nMode: {mode}\n"
                 "Allowed: status, recall, isolated AI analysis"
             )
+        if text == "/repos":
+            return "Routes:\n" + "\n".join(
+                f"- {alias}: {route.project} -> {route.repo or 'read-only'}"
+                for alias, route in self.routes.items()
+            )
+        if text.startswith("/use "):
+            alias = text[5:].strip()
+            if alias not in self.routes:
+                return "Unknown route. Use /repos."
+            self.selected[user_id] = alias
+            route = self.routes[alias]
+            return f"Route selected: {alias}\nProject: {route.project}\nRepo: {route.repo or '-'}"
         if text.startswith("/recall "):
-            return self._recall(text[8:].strip())
+            return self._recall(user_id, text[8:].strip())
         if text.startswith("/ask "):
-            return self._ask(text[5:].strip())
+            return self._ask(user_id, text[5:].strip())
         if text.startswith("/propose "):
             return self._propose(user_id, text[9:].strip())
         if text.startswith("/approve "):
@@ -186,21 +236,23 @@ class TelegramService:
             return self._merge(user_id, text[7:].strip())
         return _HELP
 
-    def _recall(self, query: str) -> str:
+    def _recall(self, user_id: int, query: str) -> str:
         if not query:
             return "Usage: /recall <query>"
+        project = self._scope(user_id).project
         with Index(self.cfg.index_path) as index:
             index.reindex(self.cfg.vault)
-            return build_context(index, query, project=self.project)["markdown"]
+            return build_context(index, query, project=project)["markdown"]
 
-    def _ask(self, request: str) -> str:
+    def _ask(self, user_id: int, request: str) -> str:
         provider, separator, objective = request.partition(" ")
         providers = {"antigravity", "claude", "codex", "omp", "opencode"}
         if not separator or provider not in providers:
             return "Usage: /ask <antigravity|claude|codex|omp|opencode> <objective>"
+        project = self._scope(user_id).project
         with Index(self.cfg.index_path) as index:
             index.reindex(self.cfg.vault)
-            envelope = build_envelope(index, objective, self.project)
+            envelope = build_envelope(index, objective, project)
         isolated = Path(tempfile.gettempdir()) / "mnemo-bridge"
         isolated.mkdir(parents=True, exist_ok=True)
         result = run_bridge(provider, envelope, workdir=isolated)
@@ -213,7 +265,7 @@ class TelegramService:
         return f"Task failed ({provider}):\n{result.error}"
 
     def _propose(self, user_id: int, request: str) -> str:
-        if self.repo is None:
+        if self._scope(user_id).repo is None:
             return "Write proposals are disabled: start the bot with --repo."
         provider, separator, objective = request.partition(" ")
         if not separator or provider != "codex":
@@ -224,8 +276,9 @@ class TelegramService:
         self, user_id: int, provider: str, objective: str
     ) -> TelegramReply:
         with ApprovalStore(self.approvals_path) as store:
+            repo = self._scope(user_id).repo
             approval = store.create(
-                user_id=user_id, provider=provider, objective=objective, repo=self.repo
+                user_id=user_id, provider=provider, objective=objective, repo=repo
             )
         return TelegramReply(
             text=(
@@ -242,13 +295,14 @@ class TelegramService:
         )
 
     def _flow(self, user_id: int, objective: str) -> str:
-        if self.repo is None:
+        scope = self._scope(user_id)
+        if scope.repo is None:
             return "Workflow writes are disabled: start the bot with --repo."
         if not objective:
             return "Usage: /flow <objective>"
         with Index(self.cfg.index_path) as index:
             index.reindex(self.cfg.vault)
-            envelope = build_envelope(index, objective, self.project)
+            envelope = build_envelope(index, objective, scope.project)
         isolated = Path(tempfile.gettempdir()) / "mnemo-bridge"
         isolated.mkdir(parents=True, exist_ok=True)
         analysis = run_bridge("claude", envelope, workdir=isolated)
@@ -309,9 +363,10 @@ class TelegramService:
             f"Status:\n{execution.status[:2_000]}\n\n"
             f"Diff:\n{execution.diff[:10_000]}"
         )
+        project = self._project_for_repo(approval.repo)
         with Index(self.cfg.index_path) as index:
             index.reindex(self.cfg.vault)
-            envelope = build_envelope(index, review_objective, self.project)
+            envelope = build_envelope(index, review_objective, project)
         isolated = Path(tempfile.gettempdir()) / "mnemo-bridge"
         review_result = run_bridge("claude", envelope, workdir=isolated)
         review = review_result.output if review_result.success else f"failed: {review_result.error}"
@@ -334,7 +389,7 @@ class TelegramService:
                     title=candidate["title"],
                     summary=candidate["summary"],
                     body=candidate["body"],
-                    project=self.project,
+                    project=project,
                     tags=candidate["tags"],
                     supersedes=candidate["supersedes"],
                     status="draft",
@@ -409,6 +464,7 @@ class TelegramService:
             candidate = distill(text)
             if not candidate["remember"]:
                 return f"No durable memory proposed: {candidate['reason']}"
+            project = self._scope(user_id).project
             with Index(self.cfg.index_path) as index:
                 index.reindex(self.cfg.vault)
                 note = write_note(
@@ -418,7 +474,7 @@ class TelegramService:
                     title=candidate["title"],
                     summary=candidate["summary"],
                     body=candidate["body"],
-                    project=self.project,
+                    project=project,
                     tags=candidate["tags"],
                     supersedes=candidate["supersedes"],
                     status="draft",
@@ -466,10 +522,11 @@ def run_bot(
     project: str,
     users: set[int],
     repo: str | Path | None = None,
+    routes: dict[str, RepoRoute] | None = None,
     once: bool = False,
 ) -> None:
     client = TelegramClient(token)
-    service = TelegramService(vault, project, users, repo=repo)
+    service = TelegramService(vault, project, users, repo=repo, routes=routes)
     offset = None
     while True:
         for update in client.updates(offset):
