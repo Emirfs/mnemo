@@ -14,6 +14,7 @@ The Telegram front-end is deliberately read-only. It exposes only:
 - `/patch <proposal-id>`
 - `/distill <session text>`
 - `/research <topic>`
+- `/research-config [rounds=0|1|2] [providers=name,name]`
 - `/research-answer <id> <answers>`
 - `/research-status <id>`
 - `/research-result <id>`
@@ -49,6 +50,17 @@ files, vault files, shell tools, write tools, or credentials. Cited URLs are
 checked separately; private and loopback addresses are rejected. Final reports
 distinguish verified from unverified sources and remain available through
 `/research-result`. Bot also sends report when background session finishes.
+
+Use `/research-config` to inspect persistent per-user defaults. For example,
+`/research-config rounds=1 providers=claude,codex,omp` selects three providers
+and one cross-critique round. `rounds=0` runs only initial parallel research;
+the mechanical maximum remains two rounds.
+
+Completion notifications contain only a short preview. `/research-result`
+returns the same preview and attaches the full Markdown record. Every terminal
+research session is archived in the Mnemo vault as one `reference` note with
+the request, configuration, final report, sources, and all provider
+conversations. Automatic archives remain `draft + inferred` until verified.
 
 `/merge` creates a second one-time approval. After approval, Mnemo verifies the
 binary patch with `git apply --check` and applies it to a clean main worktree.

@@ -20,7 +20,7 @@ from .executor import CodexWorktreeExecutor, MergeExecutor
 from .feedback import FeedbackStore
 from .index import Index
 from .librarian import distill
-from .research import ResearchEngine, ResearchStore, clarify_topic
+from .research import PROVIDERS, ResearchEngine, ResearchStore, clarify_topic
 from .writer import write_note
 
 _MAX_INPUT = 8_000
@@ -38,6 +38,7 @@ _HELP = """Mnemo read-only bot
 /patch <proposal-id>
 /distill <session text>
 /research <topic>
+/research-config [rounds=0|1|2] [providers=name,name]
 /research-answer <id> <answers>
 /research-status <id>
 /research-result <id>
@@ -256,6 +257,10 @@ class TelegramService:
             return self._diff(user_id, text[7:].strip(), download=True)
         if text.startswith("/distill "):
             return self._distill(user_id, text[9:].strip())
+        if text == "/research-config":
+            return self._research_config(user_id, "")
+        if text.startswith("/research-config "):
+            return self._research_config(user_id, text[17:].strip())
         if text.startswith("/research-answer "):
             return self._research_answer(user_id, text[17:].strip())
         if text.startswith("/research-status "):
@@ -544,8 +549,20 @@ class TelegramService:
         except Exception:
             questions = []
         scope = self._scope(user_id)
-        session_id = ResearchStore(self.research_path).create(
-            topic, user_id, scope.project, 900, questions
+        store = ResearchStore(self.research_path)
+        preferences = store.preferences(user_id)
+        session_id = store.create(
+            topic,
+            user_id,
+            scope.project,
+            900,
+            questions,
+            preferences["providers"],
+            preferences["rounds"],
+        )
+        plan = (
+            f"Providers: {', '.join(preferences['providers'])}\n"
+            f"Critique rounds: {preferences['rounds']}"
         )
         if questions:
             rendered = "\n".join(
@@ -553,11 +570,48 @@ class TelegramService:
                 for number, question in enumerate(questions, 1)
             )
             return (
-                f"Research {session_id} needs clarification:\n{rendered}\n\n"
+                f"Research {session_id} needs clarification:\n{plan}\n\n{rendered}\n\n"
                 f"Reply: /research-answer {session_id} <answers>"
             )
         self._start_research(session_id)
-        return f"Research started: {session_id}\nCheck: /research-status {session_id}"
+        return (
+            f"Research started: {session_id}\n{plan}\n"
+            f"Check: /research-status {session_id}"
+        )
+
+    def _research_config(self, user_id: int, request: str) -> str:
+        store = ResearchStore(self.research_path)
+        preferences = store.preferences(user_id)
+        if request:
+            for item in request.split():
+                key, separator, value = item.partition("=")
+                if not separator or key not in {"rounds", "providers"}:
+                    return (
+                        "Usage: /research-config rounds=0|1|2 "
+                        "providers=antigravity,claude,codex,omp,opencode"
+                    )
+                if key == "rounds":
+                    try:
+                        preferences["rounds"] = int(value)
+                    except ValueError:
+                        return "Rounds must be 0, 1, or 2."
+                else:
+                    selected = list(dict.fromkeys(value.lower().split(",")))
+                    if not selected or any(provider not in PROVIDERS for provider in selected):
+                        return "Unknown provider. Available: " + ", ".join(PROVIDERS)
+                    preferences["providers"] = selected
+            try:
+                store.set_preferences(
+                    user_id, preferences["providers"], preferences["rounds"]
+                )
+            except ValueError as exc:
+                return f"Research config rejected: {exc}"
+        return (
+            "Research config\n"
+            f"Providers: {', '.join(preferences['providers'])}\n"
+            f"Critique rounds: {preferences['rounds']}\n"
+            "Change: /research-config rounds=1 providers=claude,codex"
+        )
 
     def _research_answer(self, user_id: int, request: str) -> str:
         session_id, separator, answers = request.partition(" ")
@@ -582,8 +636,9 @@ class TelegramService:
         successful = sum(item["success"] for item in contributions)
         return (
             f"Research: {session_id}\nStatus: {session['status']}\n"
-            f"Round: {session['round']}/2\n"
-            f"Providers: {successful}/{len(contributions)} successful"
+            f"Round: {session['round']}/{session['max_rounds']}\n"
+            f"Providers: {', '.join(session['providers'])}\n"
+            f"Results: {successful}/{len(contributions)} successful"
         )
 
     def _research_result(self, user_id: int, session_id: str) -> str:
@@ -593,7 +648,16 @@ class TelegramService:
         if session["status"] not in {"completed", "partial", "failed"}:
             return f"Research {session_id} is {session['status']}."
         if session["report"]:
-            return f"Research {session_id} ({session['status']}):\n\n{session['report']}"
+            preview = self._research_preview(session["report"])
+            document = self._research_document(session)
+            return TelegramReply(
+                text=(
+                    f"Research {session_id} ({session['status']})\n"
+                    f"Mnemo note: {session['note_id'] or '-'}\n\n{preview}\n\n"
+                    "Full report and provider conversations are attached as Markdown."
+                ),
+                document=document,
+            )
         return f"Research {session_id} failed safely: {session['error'] or 'no report'}"
 
     def _research_cancel(self, user_id: int, session_id: str) -> str:
@@ -615,13 +679,23 @@ class TelegramService:
             with Index(self.cfg.index_path) as index:
                 index.reindex(self.cfg.vault)
                 result = ResearchEngine(index, store).run(session_id)
+                try:
+                    self._archive_research(index, store, result)
+                    result = store.get(session_id)
+                except Exception:
+                    pass
         except Exception as exc:
             store.update(session_id, status="failed", error=str(exc))
             result = store.get(session_id)
         if not self.notifier:
             return
         if result.get("report"):
-            message = f"Research {session_id} ({result['status']}):\n\n{result['report']}"
+            message = (
+                f"Research {session_id} completed ({result['status']}).\n"
+                f"Mnemo note: {result.get('note_id') or '-'}\n\n"
+                f"{self._research_preview(result['report'])}\n\n"
+                f"Full report: /research-result {session_id}"
+            )
         else:
             message = (
                 f"Research {session_id} {result['status']}: "
@@ -631,6 +705,69 @@ class TelegramService:
             self.notifier(result["user_id"], message)
         except Exception:
             pass
+
+    @staticmethod
+    def _research_preview(report: str, limit: int = 1_200) -> str:
+        report = report.strip()
+        if len(report) <= limit:
+            return report
+        boundary = report.rfind("\n", 0, limit)
+        return report[: boundary if boundary > 400 else limit].rstrip() + "\n[summary truncated]"
+
+    def _research_document(self, session: dict) -> Path | None:
+        if not session.get("note_id"):
+            return None
+        with Index(self.cfg.index_path) as index:
+            index.reindex(self.cfg.vault)
+            row = index.con.execute(
+                "SELECT path FROM notes WHERE id=?", (session["note_id"],)
+            ).fetchone()
+        return self.cfg.vault / row["path"] if row else None
+
+    def _archive_research(self, index, store: ResearchStore, session: dict):
+        if session.get("note_id"):
+            return
+        contributions = store.contributions(session["id"])
+        sources = store.sources(session["id"])
+        conversation = "\n\n".join(
+            (
+                f"### Round {item['round']} - {item['provider']} "
+                f"({'success' if item['success'] else 'failed'})\n\n"
+                f"{item['content'] or item['error'] or '(empty)'}"
+            )
+            for item in contributions
+        )
+        source_text = "\n".join(
+            f"- {'verified' if item['verified'] else 'unverified'}: {item['url']}"
+            for item in sources
+        ) or "(none)"
+        body = (
+            f"## Request\n\n{session['topic']}\n\n"
+            f"## Configuration\n\nProviders: {', '.join(session['providers'])}\n\n"
+            f"Critique rounds: {session['max_rounds']}\n\n"
+            f"User clarification: {session['answers'] or '(none)'}\n\n"
+            f"## Final Report\n\n{session['report'] or session['error'] or '(none)'}\n\n"
+            f"## Sources\n\n{source_text}\n\n"
+            f"## Provider Conversations\n\n{conversation or '(none)'}"
+        )
+        summary = self._research_preview(
+            session["report"] or session["error"] or session["topic"], limit=300
+        ).replace("\n", " ")
+        note = write_note(
+            self.cfg,
+            index,
+            id=f"research-{session['id']}",
+            type="reference",
+            title=f"Research {session['id']}: {session['topic'][:80]}",
+            summary=summary,
+            body=body,
+            project=session["project"],
+            tags=["research", "multi-ai"],
+            status="draft",
+            verification="inferred",
+            sources=[f"research:{session['id']}"] + [item["url"] for item in sources],
+        )
+        store.update(session["id"], note_id=note["id"])
 
     def _merge(self, user_id: int, source_id: str) -> str | TelegramReply:
         try:

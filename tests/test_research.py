@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import time
 
@@ -169,3 +170,54 @@ def test_cancelled_session_cannot_be_claimed(tmp_path):
 
     assert result["status"] == "cancelled"
     assert store.contributions(session_id) == []
+
+
+def test_selected_providers_and_rounds_are_persisted(tmp_path):
+    calls = []
+
+    def runner(provider, envelope, **kwargs):
+        calls.append(provider)
+        return BridgeResult(provider, True, output="ok")
+
+    store = ResearchStore(tmp_path / "db")
+    engine = ResearchEngine(
+        _Index(), store, runner=runner, synthesizer=lambda *args: "report"
+    )
+    session_id = engine.create(
+        "topic", 1, providers=["claude", "codex"], rounds=1
+    )
+
+    result = engine.run(session_id)
+
+    assert result["providers"] == ["claude", "codex"]
+    assert result["max_rounds"] == 1
+    assert calls.count("claude") == calls.count("codex") == 2
+    assert set(calls) == {"claude", "codex"}
+
+
+def test_user_research_preferences_are_validated(tmp_path):
+    store = ResearchStore(tmp_path / "db")
+    assert store.preferences(7) == {"providers": list(PROVIDERS), "rounds": 2}
+
+    store.set_preferences(7, ["codex", "claude", "codex"], 1)
+
+    assert store.preferences(7) == {"providers": ["codex", "claude"], "rounds": 1}
+    with pytest.raises(ValueError, match="rounds"):
+        store.set_preferences(7, ["claude"], 3)
+
+
+def test_store_migrates_existing_research_database(tmp_path):
+    path = tmp_path / "db"
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "CREATE TABLE research_sessions ("
+            "id TEXT PRIMARY KEY, user_id INTEGER, project TEXT, topic TEXT, "
+            "questions TEXT, answers TEXT, status TEXT, created REAL, deadline REAL, "
+            "round INTEGER, report TEXT, error TEXT)"
+        )
+
+    ResearchStore(path)
+
+    with sqlite3.connect(path) as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(research_sessions)")}
+    assert {"providers", "max_rounds", "note_id"} <= columns

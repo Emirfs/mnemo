@@ -7,6 +7,7 @@ import pytest
 from mnemo.approval import ApprovalStore
 from mnemo.bridge import BridgeResult
 from mnemo.executor import ExecutionResult
+from mnemo.index import Index
 from mnemo.research import ResearchStore
 from mnemo.telegram import (
     TelegramClient,
@@ -290,6 +291,56 @@ def test_research_completion_notifies_user(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("mnemo.telegram.ResearchEngine", FakeEngine)
     service._run_research(session_id)
 
-    assert notifications == [
-        (12, f"Research {session_id} (completed):\n\nfinal report")
-    ]
+    assert len(notifications) == 1
+    assert notifications[0][0] == 12
+    assert "final report" in notifications[0][1]
+    assert f"/research-result {session_id}" in notifications[0][1]
+
+
+def test_research_config_controls_new_session(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("mnemo.telegram.clarify_topic", lambda topic: [])
+    service = TelegramService(tmp_path / "vault", "p", {12})
+    monkeypatch.setattr(service, "_start_research", lambda session_id: None)
+
+    response = service.handle(
+        12, "/research-config rounds=1 providers=claude,codex"
+    )
+    started = service.handle(12, "/research configurable topic")
+    session_id = started.split()[2]
+    session = ResearchStore(service.research_path).get(session_id)
+
+    assert "Critique rounds: 1" in response
+    assert session["providers"] == ["claude", "codex"]
+    assert session["max_rounds"] == 1
+
+
+def test_research_is_archived_as_markdown_with_conversations(tmp_path: Path):
+    service = TelegramService(tmp_path / "vault", "p", {12})
+    store = ResearchStore(service.research_path)
+    session_id = store.create(
+        "database comparison", 12, "p", 900, providers=["claude"], rounds=0
+    )
+    store.add_contribution(
+        session_id,
+        0,
+        BridgeResult("claude", True, output="specialist evidence"),
+    )
+    store.update(session_id, status="completed", report="short final report")
+
+    with Index(service.cfg.index_path) as index:
+        index.reindex(service.cfg.vault)
+        service._archive_research(index, store, store.get(session_id))
+
+    session = store.get(session_id)
+    note = next((tmp_path / "vault").rglob(f"research-{session_id}.md"))
+    content = note.read_text(encoding="utf-8")
+    reply = service.handle(12, f"/research-result {session_id}")
+
+    assert session["note_id"] == f"research-{session_id}"
+    assert "status: draft" in content
+    assert "verification: inferred" in content
+    assert "## Provider Conversations" in content
+    assert "specialist evidence" in content
+    assert isinstance(reply, TelegramReply)
+    assert reply.document == note
+    assert len(reply.text) < 1_600
