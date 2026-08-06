@@ -27,8 +27,10 @@ def install(
 ) -> Path:
     if os.name != "nt":
         raise RuntimeError("Telegram autostart is currently Windows-only")
+    executable = Path(sys.executable)
+    pythonw = executable.with_name("pythonw.exe")
     args = [
-        sys.executable,
+        str(pythonw if pythonw.exists() else executable),
         "-m",
         "mnemo.cli",
         "--vault",
