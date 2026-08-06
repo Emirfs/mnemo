@@ -130,6 +130,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sfe = sub.add_parser("feedback-export", help="export labelled bridge interactions")
     sfe.add_argument("out")
 
+    sta = sub.add_parser("telegram-autostart", help="manage hidden Windows login startup")
+    sta.add_argument("action", choices=("install", "status", "uninstall"))
+    sta.add_argument("--project", default="mnemo")
+    sta.add_argument("--repo")
+    sta.add_argument("--repos")
+
     sd = sub.add_parser("daily", help="append an entry to today's daily note")
     sd.add_argument("text", nargs="?", help="entry text; omitted/'-' reads stdin")
 
@@ -332,6 +338,23 @@ def main(argv: list[str] | None = None) -> int:
         with FeedbackStore(cfg.index_path.with_name("feedback.sqlite")) as store:
             count = store.export(args.out)
         print(json.dumps({"exported": count, "path": args.out}))
+        return 0
+
+    if args.cmd == "telegram-autostart":
+        from . import autostart
+
+        if args.action == "install":
+            path = autostart.install(
+                Config(args.vault).vault,
+                project=args.project,
+                repo=args.repo,
+                repos=args.repos,
+            )
+            print(json.dumps({"installed": True, "path": str(path)}))
+        elif args.action == "uninstall":
+            print(json.dumps({"removed": autostart.uninstall()}))
+        else:
+            print(json.dumps(autostart.status()))
         return 0
 
     if args.cmd == "project":

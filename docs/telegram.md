@@ -79,6 +79,17 @@ mnemo --vault "C:/path/to/vault" telegram `
 The allowlist is mandatory. Group messages and unauthorized users are ignored.
 Use the same project value as the repos' `.mnemo-project` marker.
 
+Install hidden user-level startup after token and allowlist environment variables
+are configured:
+
+```powershell
+mnemo --vault "C:/path/to/vault" telegram-autostart install `
+  --project my-app --repos "C:/path/to/routes.json"
+```
+
+Use `telegram-autostart status` or `telegram-autostart uninstall` to inspect or
+remove it. Launcher contains no token; it inherits user environment at login.
+
 Omit `--repo` to keep the bot strictly read-only. Repositories must be clean
 before an approved worktree can be created. Finished worktrees remain available
 for manual review; no remote merge or deletion command is exposed.
