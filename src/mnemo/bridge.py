@@ -104,6 +104,8 @@ def _command(provider: str, executable: str) -> list[str]:
             "",
             "--safe-mode",
             "--no-session-persistence",
+            "--effort",
+            "low",
         ]
     if provider == "codex":
         return [
@@ -175,7 +177,14 @@ def run_bridge(
             timeout=timeout,
             cwd=str(workdir) if workdir else None,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired:
+        return BridgeResult(
+            provider=provider,
+            success=False,
+            error=f"{provider} timed out after {timeout}s; retry the request",
+            duration_seconds=round(time.monotonic() - started, 3),
+        )
+    except OSError as exc:
         return BridgeResult(
             provider=provider,
             success=False,

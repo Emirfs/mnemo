@@ -54,7 +54,7 @@ def test_bridge_uses_read_only_flags_and_stdin(monkeypatch, provider):
     assert captured["cwd"] == "C:/safe"
     command = captured["command"]
     if provider == "claude":
-        assert "plan" in command and "--safe-mode" in command
+        assert "plan" in command and "--safe-mode" in command and "low" in command
     elif provider == "codex":
         assert "read-only" in command and "never" in command
     else:
@@ -87,3 +87,15 @@ def test_bridge_prompt_contains_no_project_path():
     prompt = envelope.prompt()
     assert "logical-project" in prompt
     assert str(Path.cwd()) not in prompt
+
+
+def test_timeout_error_does_not_expose_command(monkeypatch):
+    monkeypatch.setattr(bridge, "_executable", lambda name: "C:/secret/claude.exe")
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 10)
+
+    monkeypatch.setattr(bridge.subprocess, "run", timeout)
+    result = bridge.run_bridge("claude", TaskEnvelope("task", "p"), timeout=10)
+    assert result.error == "claude timed out after 10s; retry the request"
+    assert "C:/secret" not in result.error
