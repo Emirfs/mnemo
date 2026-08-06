@@ -224,7 +224,19 @@ def clarify_topic(
         base_url=base_url,
         model=model,
         timeout=timeout,
-        json_format=True,
+        json_schema={
+            "type": "object",
+            "properties": {
+                "needs_clarification": {"type": "boolean"},
+                "questions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 3,
+                },
+            },
+            "required": ["needs_clarification", "questions"],
+        },
+        num_ctx=2048,
     )
     if candidate.get("needs_clarification") is not True:
         return []
@@ -234,7 +246,16 @@ def clarify_topic(
     return [str(question).strip() for question in questions if str(question).strip()][:3]
 
 
-def _ollama(system, prompt, *, base_url, model, timeout, json_format=False):
+def _ollama(
+    system,
+    prompt,
+    *,
+    base_url,
+    model,
+    timeout,
+    json_schema=None,
+    num_ctx=16384,
+):
     payload = {
         "model": model,
         "system": system,
@@ -242,10 +263,10 @@ def _ollama(system, prompt, *, base_url, model, timeout, json_format=False):
         "stream": False,
         "think": False,
         "keep_alive": "0s",
-        "options": {"temperature": 0, "num_ctx": 16384},
+        "options": {"temperature": 0, "num_ctx": num_ctx},
     }
-    if json_format:
-        payload["format"] = "json"
+    if json_schema:
+        payload["format"] = json_schema
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/api/generate",
         data=json.dumps(payload).encode(),
@@ -255,7 +276,7 @@ def _ollama(system, prompt, *, base_url, model, timeout, json_format=False):
     with urllib.request.urlopen(request, timeout=timeout) as response:
         envelope = json.loads(response.read().decode())
     text = envelope["response"]
-    return json.loads(text) if json_format else text.strip()
+    return json.loads(text) if json_schema else text.strip()
 
 
 def _safe_web_url(url: str):

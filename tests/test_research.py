@@ -87,6 +87,8 @@ def test_engine_does_not_retry_failed_provider(tmp_path):
 
 
 def test_clarification_is_capped_at_three(monkeypatch):
+    captured = {}
+
     class Response:
         def __enter__(self):
             return self
@@ -98,8 +100,14 @@ def test_clarification_is_capped_at_three(monkeypatch):
             candidate = {"needs_clarification": True, "questions": ["1", "2", "3", "4"]}
             return json.dumps({"response": json.dumps(candidate)}).encode()
 
-    monkeypatch.setattr("mnemo.research.urllib.request.urlopen", lambda *args, **kwargs: Response())
+    def fake_urlopen(request, **kwargs):
+        captured.update(json.loads(request.data.decode()))
+        return Response()
+
+    monkeypatch.setattr("mnemo.research.urllib.request.urlopen", fake_urlopen)
     assert clarify_topic("unclear") == ["1", "2", "3"]
+    assert captured["format"]["properties"]["questions"]["maxItems"] == 3
+    assert captured["options"]["num_ctx"] == 2048
 
 
 def test_round_limit_is_mechanical(tmp_path):
