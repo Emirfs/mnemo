@@ -36,7 +36,7 @@ embed = [
     "sqlite-vec>=0.1.6",
 ]
 mcp = [
-    "mcp>=1.2.0",
+    "mcp>=1.2.0,<2",
 ]
 dev = [
     "pytest>=8.0",

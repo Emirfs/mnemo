@@ -89,7 +89,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sd = sub.add_parser("daily", help="append an entry to today's daily note")
     sd.add_argument("text", nargs="?", help="entry text; omitted/'-' reads stdin")
 
-    sub.add_parser("serve", help="run the MCP server over stdio (cross-AI, pull)")
+    sv = sub.add_parser("serve", help="run the MCP server over stdio (cross-AI, pull)")
+    sv.add_argument(
+        "--project",
+        help="scope MCP search, MOC, and writes to one project",
+    )
 
     si = sub.add_parser("init", help="scaffold the vault as a git repo")
     si.add_argument("--remote", help="git remote URL (use a PRIVATE repo)")
@@ -203,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "serve":
         from .server import run as serve
-        serve(args.vault)
+        serve(args.vault, project=args.project)
         return 0
 
     if args.cmd == "project":

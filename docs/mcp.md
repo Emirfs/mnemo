@@ -31,7 +31,7 @@ uv tool install "mnemofish[mcp]"     # or: pipx install "mnemofish[mcp]"
   "mcpServers": {
     "mnemo": {
       "command": "mnemo",
-      "args": ["--vault", "C:/Users/you/my-memory", "serve"]
+      "args": ["--vault", "C:/Users/you/my-memory", "serve", "--project", "my-app"]
     }
   }
 }
@@ -46,7 +46,7 @@ uv tool install "mnemofish[mcp]"     # or: pipx install "mnemofish[mcp]"
   "mcpServers": {
     "mnemo": {
       "command": "mnemo",
-      "args": ["--vault", "C:/Users/you/my-memory", "serve"]
+      "args": ["--vault", "C:/Users/you/my-memory", "serve", "--project", "my-app"]
     }
   }
 }
@@ -54,3 +54,8 @@ uv tool install "mnemofish[mcp]"     # or: pipx install "mnemofish[mcp]"
 
 The server runs over stdio and reindexes incrementally on each call, so edits
 made in Obsidian (or pulled via git) are picked up automatically.
+
+`--project` scopes every search, MOC, and write to that project. A conflicting
+project from the AI is rejected instead of silently splitting memory. Use the
+same value as the repo's `.mnemo-project` marker. Omit it only when you want a
+global, cross-project MCP server.
