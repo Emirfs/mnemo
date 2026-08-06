@@ -190,12 +190,64 @@ class Index:
     def count(self) -> int:
         return self.con.execute("SELECT COUNT(*) FROM notes").fetchone()[0]
 
-    def fts_ids(self, query: str, limit: int) -> list[str]:
+    def eligible_ids(
+        self,
+        *,
+        type: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+    ) -> set[str]:
+        clauses = ["COALESCE(status, 'active') = 'active'"]
+        params: list = []
+        if type:
+            clauses.append("type = ?")
+            params.append(type)
+        if project:
+            clauses.append("project = ?")
+            params.append(project)
+        if tags:
+            placeholders = ",".join("?" for _ in tags)
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM json_each(notes.tags) "
+                f"WHERE json_each.value IN ({placeholders}))"
+            )
+            params.extend(tags)
         rows = self.con.execute(
-            """SELECT id, bm25(notes_fts) AS rank
-               FROM notes_fts WHERE notes_fts MATCH ?
-               ORDER BY rank LIMIT ?""",
-            (fts_query(query), limit),
+            f"SELECT id FROM notes WHERE {' AND '.join(clauses)}", params
+        ).fetchall()
+        return {r["id"] for r in rows}
+
+    def fts_ids(
+        self,
+        query: str,
+        limit: int,
+        *,
+        type: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[str]:
+        clauses = ["notes_fts MATCH ?", "COALESCE(n.status, 'active') = 'active'"]
+        params: list = [fts_query(query)]
+        if type:
+            clauses.append("n.type = ?")
+            params.append(type)
+        if project:
+            clauses.append("n.project = ?")
+            params.append(project)
+        if tags:
+            placeholders = ",".join("?" for _ in tags)
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM json_each(n.tags) "
+                f"WHERE json_each.value IN ({placeholders}))"
+            )
+            params.extend(tags)
+        params.append(limit)
+        rows = self.con.execute(
+            f"""SELECT notes_fts.id, bm25(notes_fts) AS rank
+                FROM notes_fts JOIN notes AS n ON n.id = notes_fts.id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY rank LIMIT ?""",
+            params,
         ).fetchall()
         return [r["id"] for r in rows]
 

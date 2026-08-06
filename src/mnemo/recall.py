@@ -30,7 +30,8 @@ def _moc(con, project: str | None):
     return con.execute(
         "SELECT id, title, summary, body FROM notes "
         "WHERE type = 'project' AND project = ? "
-        "AND COALESCE(status,'active') = 'active' LIMIT 1",
+        "AND COALESCE(status,'active') = 'active' "
+        "ORDER BY COALESCE(updated, created, '') DESC, id DESC LIMIT 1",
         (project,),
     ).fetchone()
 
