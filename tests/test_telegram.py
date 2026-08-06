@@ -325,6 +325,11 @@ def test_research_is_archived_as_markdown_with_conversations(tmp_path: Path):
         0,
         BridgeResult("claude", True, output="specialist evidence"),
     )
+    store.add_contribution(
+        session_id,
+        0,
+        BridgeResult("opencode", False, error="The command line is too long."),
+    )
     store.update(session_id, status="completed", report="short final report")
 
     with Index(service.cfg.index_path) as index:
@@ -341,6 +346,8 @@ def test_research_is_archived_as_markdown_with_conversations(tmp_path: Path):
     assert "verification: inferred" in content
     assert "## Provider Conversations" in content
     assert "specialist evidence" in content
+    assert "command line is too long" not in content
+    assert "provider failed; full error retained" in content
     assert isinstance(reply, TelegramReply)
     assert reply.document == note
     assert len(reply.text) < 1_600

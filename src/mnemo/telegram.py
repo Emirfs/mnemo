@@ -729,17 +729,27 @@ class TelegramService:
             return
         contributions = store.contributions(session["id"])
         sources = store.sources(session["id"])
+
+        def excerpt(item):
+            if not item["success"]:
+                return "(provider failed; full error retained in research.sqlite)"
+            text = item["content"] or item["error"] or "(empty)"
+            if len(text) <= 1_200:
+                return text
+            return text[:1_200].rstrip() + "\n\n[truncated; full output retained in research.sqlite]"
+
         conversation = "\n\n".join(
             (
                 f"### Round {item['round']} - {item['provider']} "
                 f"({'success' if item['success'] else 'failed'})\n\n"
-                f"{item['content'] or item['error'] or '(empty)'}"
+                f"{excerpt(item)}"
             )
             for item in contributions
         )
+        displayed_sources = sources[:20]
         source_text = "\n".join(
             f"- {'verified' if item['verified'] else 'unverified'}: {item['url']}"
-            for item in sources
+            for item in displayed_sources
         ) or "(none)"
         body = (
             f"## Request\n\n{session['topic']}\n\n"
@@ -765,7 +775,8 @@ class TelegramService:
             tags=["research", "multi-ai"],
             status="draft",
             verification="inferred",
-            sources=[f"research:{session['id']}"] + [item["url"] for item in sources],
+            sources=[f"research:{session['id']}"]
+            + [item["url"] for item in displayed_sources],
         )
         store.update(session["id"], note_id=note["id"])
 

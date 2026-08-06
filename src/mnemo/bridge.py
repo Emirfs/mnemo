@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -335,7 +336,23 @@ def run_bridge(
             "UNTRUSTED TASK JSON END"
         )
     use_stdin = provider in {"claude", "codex", "gemini"}
-    if not use_stdin:
+    prompt_file = None
+    if provider == "opencode":
+        directory = str(workdir) if workdir else None
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".md",
+            prefix="mnemo-task-",
+            dir=directory,
+            delete=False,
+        ) as attachment:
+            attachment.write(prompt)
+            prompt_file = Path(attachment.name)
+        command.extend(
+            ["Complete the attached research task now.", f"--file={prompt_file}"]
+        )
+    elif not use_stdin:
         command.append(prompt)
     started = time.monotonic()
     environment = None
@@ -345,31 +362,35 @@ def run_bridge(
             _OPENCODE_RESEARCH_CONFIG, separators=(",", ":")
         )
     try:
-        proc = subprocess.run(
-            command,
-            input=prompt if use_stdin else None,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            cwd=str(workdir) if workdir else None,
-            env=environment,
-        )
-    except subprocess.TimeoutExpired:
-        return BridgeResult(
-            provider=provider,
-            success=False,
-            error=f"{provider} timed out after {timeout}s; retry the request",
-            duration_seconds=round(time.monotonic() - started, 3),
-        )
-    except OSError as exc:
-        return BridgeResult(
-            provider=provider,
-            success=False,
-            error=str(exc),
-            duration_seconds=round(time.monotonic() - started, 3),
-        )
+        try:
+            proc = subprocess.run(
+                command,
+                input=prompt if use_stdin else None,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                cwd=str(workdir) if workdir else None,
+                env=environment,
+            )
+        except subprocess.TimeoutExpired:
+            return BridgeResult(
+                provider=provider,
+                success=False,
+                error=f"{provider} timed out after {timeout}s; retry the request",
+                duration_seconds=round(time.monotonic() - started, 3),
+            )
+        except OSError as exc:
+            return BridgeResult(
+                provider=provider,
+                success=False,
+                error=str(exc),
+                duration_seconds=round(time.monotonic() - started, 3),
+            )
+    finally:
+        if prompt_file:
+            prompt_file.unlink(missing_ok=True)
     duration = round(time.monotonic() - started, 3)
     if proc.returncode:
         return BridgeResult(

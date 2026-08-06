@@ -559,10 +559,12 @@ class ResearchEngine:
 
     @staticmethod
     def _fallback_report(session, contributions, error):
+        successful = [item for item in contributions if item["success"]]
+        latest_round = max(item["round"] for item in successful)
         findings = "\n\n".join(
-            f"### {item['provider']} round {item['round']}\n{item['content']}"
-            for item in contributions
-            if item["success"]
+            f"### {item['provider']} round {item['round']}\n{item['content'][:600]}"
+            for item in successful
+            if item["round"] == latest_round
         )
         return (
             f"# Research report: {session['topic']}\n\n"

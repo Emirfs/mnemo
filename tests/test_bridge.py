@@ -81,12 +81,16 @@ def test_opencode_research_injects_fail_closed_permissions(monkeypatch):
 @pytest.mark.parametrize(
     "provider", ["antigravity", "claude", "codex", "gemini", "omp", "opencode"]
 )
-def test_bridge_uses_read_only_flags_and_stdin(monkeypatch, provider):
+def test_bridge_uses_read_only_flags_and_stdin(monkeypatch, tmp_path, provider):
     captured = {}
 
     def fake_run(command, **kwargs):
         captured["command"] = command
         captured.update(kwargs)
+        file_arg = next((item for item in command if item.startswith("--file=")), None)
+        if file_arg:
+            attachment = Path(file_arg.split("=", 1)[1])
+            captured["attachment"] = attachment.read_text(encoding="utf-8")
         if provider == "claude":
             output = json.dumps(
                 {
@@ -118,7 +122,7 @@ def test_bridge_uses_read_only_flags_and_stdin(monkeypatch, provider):
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
     envelope = TaskEnvelope(objective="analyze", project="p")
 
-    result = bridge.run_bridge(provider, envelope, workdir="C:/safe")
+    result = bridge.run_bridge(provider, envelope, workdir=tmp_path)
 
     assert result.success is True
     assert result.output == "safe answer"
@@ -127,11 +131,12 @@ def test_bridge_uses_read_only_flags_and_stdin(monkeypatch, provider):
         assert "analyze" not in captured["command"]
     else:
         assert captured["input"] is None
-        assert "analyze" in captured["command"][-1]
         if provider == "opencode":
-            assert "Complete the objective in" in captured["command"][-1]
-            assert "\n" not in captured["command"][-1]
-    assert captured["cwd"] == "C:/safe"
+            assert "analyze" in captured["attachment"]
+            assert any(item.startswith("--file=") for item in captured["command"])
+        else:
+            assert "analyze" in captured["command"][-1]
+    assert captured["cwd"] == str(tmp_path)
     command = captured["command"]
     if provider == "claude":
         assert "plan" in command and "--safe-mode" in command and "low" in command
