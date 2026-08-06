@@ -263,6 +263,7 @@ token discipline comes from. (No `summary` = bad note. The fish judges you. 🐠
 | `init` / `sync` / `clone` | manage the vault as a private git repo |
 | `write` / `daily` | add notes (deduped; `--supersedes <id>` retires older ones) / append journal entries |
 | `verify` | attach evidence and promote an AI draft into active retrieval |
+| `distill` | ask a local Ollama model for one draft-only durable memory |
 | `search` / `get` | hybrid search (summaries) / fetch one full note |
 | `context` | compact query-time context pack (recency-weighted, profile-pinned) |
 | `bench` | score retrieval quality (hit-rate / MRR / recall) against a cases file |
@@ -290,6 +291,8 @@ retrieval until a human attaches evidence:
 mnemo --vault "~/my-memory" verify <id> \
   --sources "commit:abc123,test:pytest"
 ```
+
+Optional local librarian: [`docs/librarian.md`](./docs/librarian.md).
 
 ## 🔒 Privacy
 
