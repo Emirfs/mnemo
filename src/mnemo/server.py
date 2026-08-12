@@ -16,11 +16,12 @@ from .search import Search
 from .writer import write_note
 
 
-def build_server(vault: str | None = None):
+def build_server(vault: str | None = None, project: str | None = None):
     from mcp.server.fastmcp import FastMCP
 
     cfg = Config(vault)
     server = FastMCP("mnemo")
+    default_project = project
 
     from .embed import Embedder
     _embedder = Embedder() if Embedder.is_available() else None
@@ -29,6 +30,14 @@ def build_server(vault: str | None = None):
         idx = Index(cfg.index_path, embedder=_embedder)
         idx.reindex(cfg.vault)  # incremental: pick up vault edits / git pulls
         return idx
+
+    def _project(requested: str | None) -> str | None:
+        if default_project and requested and requested != default_project:
+            raise ValueError(
+                f"MCP server is scoped to project {default_project!r}; "
+                f"requested {requested!r}"
+            )
+        return default_project or requested
 
     @server.tool()
     def memory_search(
@@ -41,7 +50,9 @@ def build_server(vault: str | None = None):
         Expand a specific result with memory_get(id)."""
         idx = _open()
         try:
-            return Search(idx).search(query, type=type, project=project, k=k)
+            return Search(idx).search(
+                query, type=type, project=_project(project), k=k
+            )
         finally:
             idx.close()
 
@@ -55,12 +66,13 @@ def build_server(vault: str | None = None):
             idx.close()
 
     @server.tool()
-    def memory_moc(project: str) -> str:
+    def memory_moc(project: str | None = None) -> str:
         """Return the recall map for a project: its MOC plus recent decisions
-        and lessons (summaries only). Good first call when starting work."""
+        and lessons (summaries only). Uses the server's default project when
+        omitted. Good first call when starting work."""
         idx = _open()
         try:
-            return build_recall(idx, project)
+            return build_recall(idx, _project(project))
         finally:
             idx.close()
 
@@ -75,17 +87,20 @@ def build_server(vault: str | None = None):
         links: list[str] | None = None,
         supersedes: list[str] | None = None,
     ) -> dict:
-        """Add or update a memory note. Deduped by title within the same
+        """Add or update an inferred draft. Drafts stay out of retrieval until
+        a human verifies evidence with the CLI. Deduped by title within the same
         type/project (an equivalent title updates in place, not a duplicate).
         type: decision | lesson | daily | project | reference | note | profile.
         Pass `supersedes` with ids this note replaces — those are marked stale
-        and drop out of recall, so newer facts win over older contradictory ones."""
+        and drop out of recall after this draft is verified."""
         idx = _open()
         try:
             return write_note(
                 cfg, idx,
                 type=type, title=title, summary=summary, body=body,
-                project=project, tags=tags, links=links, supersedes=supersedes,
+                project=_project(project),
+                tags=tags, links=links, supersedes=supersedes,
+                status="draft", verification="inferred",
             )
         finally:
             idx.close()
@@ -93,5 +108,5 @@ def build_server(vault: str | None = None):
     return server
 
 
-def run(vault: str | None = None) -> None:
-    build_server(vault).run(transport="stdio")
+def run(vault: str | None = None, project: str | None = None) -> None:
+    build_server(vault, project=project).run(transport="stdio")

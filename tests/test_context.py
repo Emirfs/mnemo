@@ -171,5 +171,7 @@ def test_context_pack_is_json_friendly_summary_shape(tmp_path: Path):
     json.dumps(pack, ensure_ascii=False)
     assert set(pack) == {"project", "query", "items", "markdown"}
     assert pack["items"]
-    assert set(pack["items"][0]) == {"id", "type", "title", "summary", "path", "score"}
+    assert set(pack["items"][0]) == {
+        "id", "type", "title", "summary", "path", "verification", "sources", "score"
+    }
     assert "body" not in pack["items"][0]

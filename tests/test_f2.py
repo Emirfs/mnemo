@@ -95,3 +95,30 @@ def test_recall_empty_when_no_notes(tmp_path: Path):
     cfg, idx = make(tmp_path)
     assert build_recall(idx, "nothing") == ""
     idx.close()
+
+
+def test_recall_uses_latest_project_map(tmp_path: Path):
+    cfg, idx = make(tmp_path)
+    write_note(
+        cfg, idx, type="project", title="Old map", project="p",
+        summary="Old state.", id="20260101-old",
+    )
+    write_note(
+        cfg, idx, type="project", title="Current map", project="p",
+        summary="Current state.", id="20260102-current",
+    )
+    idx.con.execute(
+        "UPDATE notes SET created = '2026-01-01', updated = '2026-01-01' WHERE id = ?",
+        ("20260101-old",),
+    )
+    idx.con.execute(
+        "UPDATE notes SET created = '2026-01-02', updated = '2026-01-02' WHERE id = ?",
+        ("20260102-current",),
+    )
+    idx.con.commit()
+
+    block = build_recall(idx, "p")
+
+    assert "Map: Current map" in block
+    assert "Map: Old map" not in block
+    idx.close()

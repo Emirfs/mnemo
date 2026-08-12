@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS notes (
     created  TEXT,
     updated  TEXT,
     status   TEXT,
+    verification TEXT,
+    sources  TEXT,
     body     TEXT
 );
 
@@ -48,6 +50,11 @@ CREATE INDEX IF NOT EXISTS idx_notes_project ON notes(project);
 """
 
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
+_QUERY_STOP_WORDS = {
+    "a", "an", "and", "are", "for", "how", "is", "of", "or", "the", "to", "what", "why",
+    "bir", "bu", "da", "de", "ile", "icin", "için", "mi", "mu", "mı", "mü",
+    "nasıl", "ne", "neden", "nicin", "niçin", "o", "su", "şu", "ve", "veya",
+}
 
 
 def _hash(text: str) -> str:
@@ -60,6 +67,23 @@ def fts_query(text: str) -> str:
     if not terms:
         return '""'
     return " OR ".join(f'"{t}"*' for t in terms)
+
+
+def _query_terms(text: str) -> list[str]:
+    return [
+        term.casefold()
+        for term in _WORD_RE.findall(text)
+        if len(term) >= 2 and term.casefold() not in _QUERY_STOP_WORDS
+    ]
+
+
+def _enough_term_coverage(query: str, text: str) -> bool:
+    terms = _query_terms(query)
+    if len(terms) < 4:
+        return True
+    words = {word.casefold() for word in _WORD_RE.findall(text)}
+    matched = sum(any(word.startswith(term) for word in words) for term in set(terms))
+    return matched >= 2
 
 
 class Index:
@@ -90,6 +114,10 @@ class Index:
         cols = {r["name"] for r in self.con.execute("PRAGMA table_info(notes)")}
         if "status" not in cols:
             self.con.execute("ALTER TABLE notes ADD COLUMN status TEXT")
+        if "verification" not in cols:
+            self.con.execute("ALTER TABLE notes ADD COLUMN verification TEXT")
+        if "sources" not in cols:
+            self.con.execute("ALTER TABLE notes ADD COLUMN sources TEXT")
 
     def _enable_vectors(self) -> None:
         try:
@@ -138,12 +166,14 @@ class Index:
         self.con.execute(
             """INSERT INTO notes
                (id, path, mtime, hash, type, project, title, summary, tags,
-                created, updated, status, body)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 created, updated, status, verification, sources, body)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 note.id, rel, mtime, h, note.type, note.project, note.title,
                 note.summary, json.dumps(note.tags, ensure_ascii=False),
-                note.created, note.updated, note.status or "active", note.body,
+                note.created, note.updated, note.status or "active",
+                note.verification or "unknown",
+                json.dumps(note.sources, ensure_ascii=False), note.body,
             ),
         )
         self.con.execute(
@@ -190,14 +220,82 @@ class Index:
     def count(self) -> int:
         return self.con.execute("SELECT COUNT(*) FROM notes").fetchone()[0]
 
-    def fts_ids(self, query: str, limit: int) -> list[str]:
+    def eligible_ids(
+        self,
+        *,
+        type: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+    ) -> set[str]:
+        clauses = ["COALESCE(status, 'active') = 'active'"]
+        params: list = []
+        if type:
+            clauses.append("type = ?")
+            params.append(type)
+        if project:
+            clauses.append("project = ?")
+            params.append(project)
+        if tags:
+            placeholders = ",".join("?" for _ in tags)
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM json_each(notes.tags) "
+                f"WHERE json_each.value IN ({placeholders}))"
+            )
+            params.extend(tags)
         rows = self.con.execute(
-            """SELECT id, bm25(notes_fts) AS rank
-               FROM notes_fts WHERE notes_fts MATCH ?
-               ORDER BY rank LIMIT ?""",
-            (fts_query(query), limit),
+            f"SELECT id FROM notes WHERE {' AND '.join(clauses)}", params
         ).fetchall()
-        return [r["id"] for r in rows]
+        return {r["id"] for r in rows}
+
+    def fts_ids(
+        self,
+        query: str,
+        limit: int,
+        *,
+        type: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[str]:
+        clauses = ["notes_fts MATCH ?", "COALESCE(n.status, 'active') = 'active'"]
+        params: list = [fts_query(query)]
+        if type:
+            clauses.append("n.type = ?")
+            params.append(type)
+        if project:
+            clauses.append("n.project = ?")
+            params.append(project)
+        if tags:
+            placeholders = ",".join("?" for _ in tags)
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM json_each(n.tags) "
+                f"WHERE json_each.value IN ({placeholders}))"
+            )
+            params.extend(tags)
+        candidate_limit = limit * 4
+        params.append(candidate_limit)
+        rows = self.con.execute(
+            f"""SELECT notes_fts.id, n.title, n.summary, n.body, n.tags,
+                       bm25(notes_fts) AS rank
+                FROM notes_fts JOIN notes AS n ON n.id = notes_fts.id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY rank LIMIT ?""",
+            params,
+        ).fetchall()
+        return [
+            r["id"]
+            for r in rows
+            if _enough_term_coverage(
+                query,
+                "\n".join(
+                    (
+                        r["title"] or "",
+                        r["summary"] or "",
+                        r["body"] or "",
+                        r["tags"] or "",
+                    )
+                ),
+            )
+        ][:limit]
 
     def vec_search(self, query: str, limit: int) -> list[tuple[str, float]] | None:
         """KNN over the vector store. Returns (id, cosine_distance) or None

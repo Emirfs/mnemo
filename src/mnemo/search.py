@@ -35,30 +35,30 @@ class Search:
         k: int = 5,
     ) -> list[dict]:
         pool = max(k * 4, 10)
-        lists = [self.index.fts_ids(query, pool)]
-        vec = self.index.vec_ids(query, pool)
+        eligible = self.index.eligible_ids(type=type, project=project, tags=tags)
+        lists = [
+            self.index.fts_ids(
+                query, pool, type=type, project=project, tags=tags
+            )
+        ]
+        total = self.index.count()
+        vec_limit = total if len(eligible) < total else pool
+        vec = self.index.vec_ids(query, vec_limit) if eligible else None
         if vec is not None:
-            lists.append(vec)
+            lists.append([nid for nid in vec if nid in eligible][:pool])
         fused = _rrf(lists)
 
         results: list[dict] = []
         for nid, score in fused:
             n = self.con.execute(
                 "SELECT id, type, project, title, summary, path, tags, "
-                "created, updated, status FROM notes WHERE id = ?",
+                "created, updated, status, verification, sources "
+                "FROM notes WHERE id = ?",
                 (nid,),
             ).fetchone()
             if n is None:
                 continue
-            if (n["status"] or "active") != "active":
-                continue  # superseded / expired notes stay out of retrieval
-            if type and n["type"] != type:
-                continue
-            if project and n["project"] != project:
-                continue
             ntags = json.loads(n["tags"] or "[]")
-            if tags and not (set(tags) & set(ntags)):
-                continue
             results.append(
                 {
                     "id": n["id"],
@@ -70,6 +70,8 @@ class Search:
                     "tags": ntags,
                     "created": n["created"],
                     "updated": n["updated"],
+                    "verification": n["verification"] or "unknown",
+                    "sources": json.loads(n["sources"] or "[]"),
                     "score": round(score, 5),
                 }
             )

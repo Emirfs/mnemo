@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from .config import Config
@@ -18,7 +19,7 @@ from .index import Index
 from .recall import build_recall
 from .search import Search
 from .vault import detect_project
-from .writer import write_note
+from .writer import verify_note, write_note
 
 
 def _csv(value: str) -> list[str]:
@@ -85,11 +86,64 @@ def _build_parser() -> argparse.ArgumentParser:
         help="comma-separated ids this note replaces (they're hidden from recall)",
     )
     sw.add_argument("--id")
+    sw.add_argument("--draft", action="store_true", help="store outside retrieval pending verification")
+    sw.add_argument(
+        "--verification",
+        choices=("unknown", "reported", "inferred", "verified"),
+        default="unknown",
+    )
+    sw.add_argument("--sources", default="", help="comma-separated evidence references")
+
+    svf = sub.add_parser("verify", help="activate a draft with evidence")
+    svf.add_argument("id")
+    svf.add_argument("--sources", required=True, help="comma-separated evidence references")
+
+    sds = sub.add_parser("distill", help="extract one draft with the local Ollama librarian")
+    sds.add_argument("--body", help="session text; '-' or omitted reads stdin")
+    sds.add_argument("--project", help="override project (else detected)")
+    sds.add_argument("--project-dir", help="dir to detect project from (default: cwd)")
+    sds.add_argument("--source", required=True, help="provenance label for the session text")
+    sds.add_argument("--model", default="qwen3:4b")
+    sds.add_argument("--dry-run", action="store_true", help="print candidate without writing")
+
+    sbr = sub.add_parser("bridge", help="send a read-only task envelope to an AI CLI")
+    sbr.add_argument(
+        "provider",
+        choices=("antigravity", "claude", "codex", "gemini", "omp", "opencode"),
+    )
+    sbr.add_argument("objective")
+    sbr.add_argument("--project", help="override project (else detected)")
+    sbr.add_argument("--project-dir", help="dir to detect project from (default: cwd)")
+    sbr.add_argument("-k", type=int, default=5)
+    sbr.add_argument("--timeout", type=int, default=180)
+
+    stg = sub.add_parser("telegram", help="run the allowlisted read-only Telegram bot")
+    stg.add_argument("--project", required=True)
+    stg.add_argument(
+        "--users",
+        help="comma-separated Telegram user ids (else $MNEMO_TELEGRAM_USERS)",
+    )
+    stg.add_argument("--repo", help="Git repository allowed for approved worktree writes")
+    stg.add_argument("--repos", help="JSON file containing multiple Telegram repo routes")
+    stg.add_argument("--once", action="store_true", help="poll once, then exit")
+
+    sfe = sub.add_parser("feedback-export", help="export labelled bridge interactions")
+    sfe.add_argument("out")
+
+    sta = sub.add_parser("telegram-autostart", help="manage hidden Windows login startup")
+    sta.add_argument("action", choices=("install", "status", "uninstall"))
+    sta.add_argument("--project", default="mnemo")
+    sta.add_argument("--repo")
+    sta.add_argument("--repos")
 
     sd = sub.add_parser("daily", help="append an entry to today's daily note")
     sd.add_argument("text", nargs="?", help="entry text; omitted/'-' reads stdin")
 
-    sub.add_parser("serve", help="run the MCP server over stdio (cross-AI, pull)")
+    sv = sub.add_parser("serve", help="run the MCP server over stdio (cross-AI, pull)")
+    sv.add_argument(
+        "--project",
+        help="scope MCP search, MOC, and writes to one project",
+    )
 
     si = sub.add_parser("init", help="scaffold the vault as a git repo")
     si.add_argument("--remote", help="git remote URL (use a PRIVATE repo)")
@@ -182,9 +236,64 @@ def _cmd_write(args, cfg, idx) -> None:
         tags=_csv(args.tags),
         links=_csv(args.links),
         supersedes=_csv(args.supersedes),
+        status="draft" if args.draft else "active",
+        verification=args.verification,
+        sources=_csv(args.sources),
         id=args.id,
     )
     print(json.dumps(result, ensure_ascii=False))
+
+
+def _cmd_distill(args, cfg, idx) -> None:
+    from .librarian import distill
+
+    body = args.body
+    if body in (None, "-"):
+        body = "" if sys.stdin.isatty() else sys.stdin.read()
+    candidate = distill(body, model=args.model)
+    if not candidate["remember"] or args.dry_run:
+        print(json.dumps(candidate, ensure_ascii=False, indent=2))
+        return
+    project = args.project or detect_project(args.project_dir or os.getcwd())
+    result = write_note(
+        cfg,
+        idx,
+        type=candidate["type"],
+        title=candidate["title"],
+        summary=candidate["summary"],
+        body=candidate["body"],
+        project=project,
+        tags=candidate["tags"],
+        supersedes=candidate["supersedes"],
+        status="draft",
+        verification="inferred",
+        sources=[args.source],
+    )
+    result["reason"] = candidate["reason"]
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def _cmd_bridge(args, idx) -> None:
+    from .bridge import build_envelope, run_bridge
+
+    project_dir = args.project_dir or os.getcwd()
+    project = args.project or detect_project(project_dir)
+    envelope = build_envelope(idx, args.objective, project, k=args.k)
+    isolated = Path(tempfile.gettempdir()) / "mnemo-bridge"
+    isolated.mkdir(parents=True, exist_ok=True)
+    result = run_bridge(
+        args.provider,
+        envelope,
+        timeout=args.timeout,
+        workdir=isolated,
+    )
+    print(
+        json.dumps(
+            {"task": envelope.to_dict(), "result": result.to_dict()},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def _force_utf8() -> None:
@@ -203,7 +312,49 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "serve":
         from .server import run as serve
-        serve(args.vault)
+        serve(args.vault, project=args.project)
+        return 0
+
+    if args.cmd == "telegram":
+        from .telegram import load_routes, parse_users, run_bot
+
+        token = os.environ.get("MNEMO_TELEGRAM_TOKEN", "")
+        users = parse_users(args.users or os.environ.get("MNEMO_TELEGRAM_USERS", ""))
+        run_bot(
+            Config(args.vault).vault,
+            token=token,
+            project=args.project,
+            users=users,
+            repo=args.repo,
+            routes=load_routes(args.repos) if args.repos else None,
+            once=args.once,
+        )
+        return 0
+
+    if args.cmd == "feedback-export":
+        from .feedback import FeedbackStore
+
+        cfg = Config(args.vault)
+        with FeedbackStore(cfg.index_path.with_name("feedback.sqlite")) as store:
+            count = store.export(args.out)
+        print(json.dumps({"exported": count, "path": args.out}))
+        return 0
+
+    if args.cmd == "telegram-autostart":
+        from . import autostart
+
+        if args.action == "install":
+            path = autostart.install(
+                Config(args.vault).vault,
+                project=args.project,
+                repo=args.repo,
+                repos=args.repos,
+            )
+            print(json.dumps({"installed": True, "path": str(path)}))
+        elif args.action == "uninstall":
+            print(json.dumps({"removed": autostart.uninstall()}))
+        else:
+            print(json.dumps(autostart.status()))
         return 0
 
     if args.cmd == "project":
@@ -241,7 +392,9 @@ def main(argv: list[str] | None = None) -> int:
     # Semantic (embedding) index for search/reindex/write/context; FTS-only
     # fast path for recall/daily/get so SessionStart never loads the model.
     emb = None
-    if args.cmd in ("reindex", "search", "write", "context", "bench"):
+    if args.cmd in (
+        "reindex", "search", "write", "distill", "bridge", "context", "bench"
+    ):
         from .embed import Embedder
         if Embedder.is_available():
             emb = Embedder()
@@ -260,7 +413,10 @@ def main(argv: list[str] | None = None) -> int:
                     print("(no matches)")
                 for r in res:
                     proj = r["project"] or "-"
-                    print(f"[{r['score']}] {r['title']}  ({r['type']}/{proj})")
+                    print(
+                        f"[{r['score']}] {r['title']}  "
+                        f"({r['type']}/{proj}, {r['verification']})"
+                    )
                     if r["summary"]:
                         print(f"    {r['summary']}")
                     print(f"    {r['path']}")
@@ -275,6 +431,13 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_bench(args, cfg, idx)
         elif args.cmd == "write":
             _cmd_write(args, cfg, idx)
+        elif args.cmd == "verify":
+            result = verify_note(cfg, idx, args.id, _csv(args.sources))
+            print(json.dumps(result, ensure_ascii=False))
+        elif args.cmd == "distill":
+            _cmd_distill(args, cfg, idx)
+        elif args.cmd == "bridge":
+            _cmd_bridge(args, idx)
         elif args.cmd == "daily":
             from .daily import append_daily
             text = args.text

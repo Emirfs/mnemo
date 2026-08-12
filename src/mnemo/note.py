@@ -12,7 +12,8 @@ NOTE_TYPES = {"decision", "lesson", "daily", "project", "reference", "note", "pr
 
 # Lifecycle states. 'active' is the default; 'superseded' / 'expired' notes are
 # kept on disk (history) but hidden from retrieval.
-NOTE_STATES = {"active", "superseded", "expired"}
+NOTE_STATES = {"active", "draft", "superseded", "expired"}
+NOTE_VERIFICATIONS = {"unknown", "reported", "inferred", "verified"}
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -45,6 +46,8 @@ class Note:
     updated: str | None = None
     links: list[str] = field(default_factory=list)
     status: str = "active"
+    verification: str = "unknown"
+    sources: list[str] = field(default_factory=list)
     supersedes: list[str] = field(default_factory=list)
     superseded_by: list[str] = field(default_factory=list)
     path: Path | None = None
@@ -58,6 +61,7 @@ class Note:
         nid = str(meta.get("id") or stem or slugify(title))
         project = meta.get("project")
         status = str(meta.get("status") or "active").strip().lower()
+        verification = str(meta.get("verification") or "unknown").strip().lower()
         return cls(
             id=nid,
             type=ntype,
@@ -70,6 +74,10 @@ class Note:
             updated=str(meta["updated"]) if meta.get("updated") else None,
             links=_as_list(meta.get("links")),
             status=status if status in NOTE_STATES else "active",
+            verification=(
+                verification if verification in NOTE_VERIFICATIONS else "unknown"
+            ),
+            sources=_as_list(meta.get("sources")),
             supersedes=_as_list(meta.get("supersedes")),
             superseded_by=_as_list(meta.get("superseded_by")),
             path=Path(path) if path else None,

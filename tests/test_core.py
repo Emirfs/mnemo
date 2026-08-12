@@ -149,6 +149,80 @@ def test_search_project_and_tags(tmp_path: Path):
     idx.close()
 
 
+def test_search_filters_before_candidate_limit(tmp_path: Path):
+    cfg, idx = make(tmp_path)
+    for i in range(15):
+        write_note(
+            tmp_path,
+            f"projects/noisy/n-{i}.md",
+            f"""
+id: noisy-{i}
+type: decision
+title: Exact anchor {i}
+project: noisy
+summary: exact anchor repeated repeated repeated {i}
+""",
+            "exact anchor repeated repeated repeated",
+        )
+    write_note(
+        tmp_path,
+        "projects/target/wanted.md",
+        """
+id: wanted
+type: lesson
+title: Anchor lesson
+project: target
+tags: [wanted]
+summary: anchor
+""",
+        "anchor",
+    )
+    idx.reindex(cfg.vault)
+
+    hits = Search(idx).search(
+        "anchor", type="lesson", project="target", tags=["wanted"], k=1
+    )
+
+    assert [hit["id"] for hit in hits] == ["wanted"]
+    idx.close()
+
+
+def test_long_query_drops_single_generic_term_match(tmp_path: Path):
+    cfg, idx = make(tmp_path)
+    write_note(
+        tmp_path,
+        "lessons/relevant.md",
+        """
+id: relevant
+type: lesson
+title: SI4432 OTA transfer stall
+project: rf
+summary: SI4432 OTA packets stall when RX loses synchronization.
+""",
+        "Radio packet transfer stops during the update.",
+    )
+    write_note(
+        tmp_path,
+        "lessons/weak.md",
+        """
+id: weak
+type: lesson
+title: General OTA release checklist
+project: rf
+summary: Record the firmware version before release.
+""",
+        "Archive build artifacts after publishing.",
+    )
+    idx.reindex(cfg.vault)
+
+    hits = Search(idx).search(
+        "si4432 ota packet transfer neden takiliyor", type="lesson", project="rf"
+    )
+
+    assert [hit["id"] for hit in hits] == ["relevant"]
+    idx.close()
+
+
 def test_deletion_removed(tmp_path: Path):
     cfg, idx = make(tmp_path)
     seed_vault(tmp_path)
