@@ -1,128 +1,126 @@
-# mnemo — Tasarım Dokümanı
+# mnemo — Design Document
 
-> Çalışma adı: **mnemo** (Mnemosyne — hafıza). Değiştirilebilir.
-> Bu dosya iç tasarım/çalışma dokümanıdır (Türkçe). Public README ayrıca İngilizce yazılacak.
-> Durum: TASLAK v0.1 — scope dondurma aşaması.
+> Working title: **mnemo** (Mnemosyne — memory). Subject to change.
+> Status: DRAFT v0.1 — scope freeze phase.
 
-Kişisel, projeler-arası, AI-arası **kalıcı hafıza (persistent memory)** sistemi.
-Markdown vault üstünde çalışan bir **MCP memory server** + **CLI** + **Claude Code hook**'ları.
+Personal, cross-project, cross-AI **persistent memory** system.
+Running over a markdown vault: **MCP memory server** + **CLI** + **Claude Code hooks**.
 
 ---
 
 ## 1. Problem
 
-Mevcut hafıza araçları (ör. claude-mem) **depolamayı** çözüyor ama **geri-çağırmayı (retrieval)** çözmüyor.
+Existing memory tools (e.g. claude-mem) solve **storage** but fail to solve **retrieval**.
 
-> Yaşanan: "Kaydet" deniyor, kaydediliyor — ama AI doğru anıyı doğru anda **okumuyor**.
+> Common scenario: "Save this" is executed, notes are saved — but the AI never **reads** the right memory at the right time.
 
-Asıl darboğaz: bilgiyi yazmak değil, **ilgili alt kümeyi doğru anda modelin context'ine otomatik enjekte etmek.**
+The real bottleneck is not writing information, but **automatically injecting the relevant subset into the model's context at the right moment.**
 
-İkinci problem: bilgi büyüdükçe token tüketimi ve bilgi kalabalığı artar. Her şeyi yüklemek sürdürülemez.
+Second problem: As information grows, token consumption and noise increase. Loading everything is unsustainable.
 
 ---
 
-## 2. Temel İlkeler
+## 2. Core Principles
 
-1. **Retrieval-first.** Sistem "yazma"ya değil, "doğru anıyı otomatik getirme"ye göre tasarlanır.
-2. **Push > Pull.** MCP tool (pull) modelin çağırmasını bekler — claude-mem'in patladığı yer. Gerçek otomasyon **hook** (push) ile: AI sormadan ilgili not context'e enjekte edilir.
-3. **Vault = tek kaynak.** Markdown dosyalar tek gerçek. Index (sqlite/embedding) türetilmiştir, her an silinip yeniden üretilebilir.
-4. **Sadece türetilemeyeni sakla.** Dosya ağacı/fonksiyon imzaları AI tarafından bulunabilir → saklama. Kararlar, ilişkiler, sözleşmeler, hatalar, niyet → sakla.
-5. **Harita önce, düğüm sonra.** Token'ı sabit tutmak için: önce küçük index (MOC) yüklenir, sadece ilgili atomik not genişletilir. Asla "her şey".
-6. **Atomik notlar.** Bir not = bir karar/gerçek/hata. Küçük → tek tek ucuz yüklenir, çakışma minimum, embedding chunking gereksiz.
+1. **Retrieval-first.** The system is designed around "auto-recalling the right memory", not "writing".
+2. **Push > Pull.** MCP tool (pull) waits for the model to invoke it — where claude-mem breaks. Real automation happens via **hooks** (push): relevant notes are injected into context before the AI asks.
+3. **Vault = single source of truth.** Markdown files are canonical. Index (sqlite/embedding) is derived and can be destroyed and rebuilt at any time.
+4. **Store only non-re-derivable content.** File trees/function signatures can be discovered by the AI → do not store. Decisions, relationships, contracts, bugs, intent → store.
+5. **Map first, node second.** To keep token cost flat: small index (MOC) is loaded first, expanding only the relevant atomic note. Never load "everything".
+6. **Atomic notes.** One note = one decision/fact/bug. Small → cheap individual loading, minimal conflicts, no chunking needed.
 
-### Türetilebilir vs türetilemez
+### Derivable vs Non-Derivable
 
-| AI kendi bulabilir (SAKLAMA) | AI bulamaz (SAKLA) |
+| AI can discover itself (DO NOT STORE) | AI cannot discover (STORE) |
 |---|---|
-| Dosya ağacı (`glob`) | Topoloji: ne nereye konuşuyor |
-| Vendor kod (HAL/CMSIS, node_modules) | Ortak protokol/sözleşmeler |
-| Fonksiyon imzaları | Neden bu karar alındı |
-| Hangi dosya var | Şu an ne yapılıyor / gotcha / hatalar |
+| File tree (`glob`) | Topology: what talks to what |
+| Vendor code (HAL/CMSIS, node_modules) | Shared protocols/contracts |
+| Function signatures | Why a decision was made |
+| Which files exist | Current activity / gotchas / bugs |
 
 ---
 
-## 3. Mimari
+## 3. Architecture
 
-**Çekirdek kütüphane + iki ön-yüz.** Bu ayrım belkemiğidir — auto-recall'ı mümkün kılar.
+**Core library + two front-ends.** This separation is key — it enables auto-recall.
 
 ```
             ┌──────────────────────────────────────────┐
-            │  Vault (markdown + frontmatter)          │  ← tek kaynak, Obsidian'da da düzenlenir
+            │  Vault (markdown + frontmatter)          │  ← single source, editable in Obsidian
             └───────────────────┬──────────────────────┘
                                 │ parse (incremental, mtime/hash)
                      ┌──────────▼───────────┐
-                     │  ÇEKİRDEK LİB        │  index.sqlite (FTS5 + vektör)
-                     │  parse / index /     │  ← türetilmiş, .gitignore, rebuild
+                     │  CORE LIB            │  index.sqlite (FTS5 + vectors)
+                     │  parse / index /     │  ← derived, gitignored, rebuildable
                      │  search / write      │
                      └─────┬───────────┬────┘
               ┌────────────▼──┐    ┌───▼─────────────────┐
-              │  CLI ön-yüz    │    │  MCP ön-yüz          │
+              │  CLI front-end │    │  MCP front-end       │
               │  (PUSH)        │    │  (PULL)              │
-              │  Claude hook   │    │  tüm MCP-uyumlu AI   │
-              │  oturum başı   │    │  konuşma içi tool    │
-              │  recall enjekte│    │  çağrısı             │
+              │  Claude hook   │    │  any MCP-capable AI  │
+              │  session-start │    │  in-chat tool calls  │
+              │  inject recall │    │                      │
               └────────────────┘    └─────────────────────┘
 ```
 
-- **Çekirdek lib:** parse + index + search + write. Tek mantık burada.
-- **CLI ön-yüz:** hook'lardan çağrılır (push). Oturum başında ilgili MOC + top-N notu basıp context'e enjekte eder. `mnemo search/write/init/sync/...`.
-- **MCP ön-yüz:** aynı çekirdeği MCP tool'ları olarak sunar → Claude Code, Cursor ve diğer MCP istemcileri aynı aramayı kullanır.
+- **Core lib:** parse + index + search + write. Single business logic.
+- **CLI front-end:** Called by hooks (push). Prints relevant MOC + top-N notes at session start into context. `mnemo search/write/init/sync/...`.
+- **MCP front-end:** Exposes core as MCP tools → Claude Code, Cursor, and other MCP clients use the same search interface.
 
 ---
 
-## 4. Vault Yapısı
+## 4. Vault Structure
 
-Vault düz bir klasör (= private GitHub reposu). Önerilen layout:
+The vault is a flat folder (= private GitHub repo). Recommended layout:
 
 ```
 my-memory/                    ← private repo
-├── daily/                    günlük notlar, todo, "bugün ne yaptım"
+├── daily/                    daily notes, todos, "what I did today"
 │   └── 2026-06-23.md
 ├── projects/
-│   └── <proje>/
-│       ├── _moc.md           proje haritası (Map of Content) — index notu
-│       └── <atomik>.md       tek karar/gerçek
-├── lessons/                  hatalar, dersler (tag'le retrieval)
-├── protocol/                 teknik sözleşmeler (ör. RF v2)
-├── reference/                kalıcı bilgi (URL, dashboard, ticket)
-├── .gitignore                index.sqlite + .cache hariç
-└── .mnemo/                   (gitignore) index.sqlite, embedding cache
+│   └── <project>/
+│       ├── _moc.md           project map (Map of Content) — index note
+│       └── <atomic>.md       single decision/fact
+├── lessons/                  bugs, lessons learned (retrieved by tag)
+├── protocol/                 technical contracts (e.g. RF v2)
+├── reference/                durable information (URLs, dashboards, tickets)
+├── .gitignore                excludes index.sqlite + .cache
+└── .mnemo/                   (gitignored) index.sqlite, embedding cache
 ```
 
-`projects/`, `lessons/` vb. **sabit değil** — kullanıcı kendi taksonomisini kurabilir; sistem `type` frontmatter'a göre çalışır, klasör adına değil.
+`projects/`, `lessons/` etc. are **not fixed** — users can define their taxonomy; the system operates on `type` frontmatter, not directory names.
 
 ---
 
-## 5. Not Şeması (frontmatter)
+## 5. Note Schema (Frontmatter)
 
-Her not = markdown + YAML frontmatter:
+Every note = markdown + YAML frontmatter:
 
 ```markdown
 ---
-id: 20260623-rf-uid-sequential        # kararlı kimlik (tarih-slug)
+id: 20260623-rf-uid-sequential        # stable identifier (date-slug)
 type: decision                         # decision | lesson | daily | project | reference | note
-title: RF güncellemesi sıralı yapılır
-project: stm32-rf-ota                  # opsiyonel
+title: RF updates are performed sequentially
+project: stm32-rf-ota                  # optional
 tags: [rf, protocol, stm32]
 created: 2026-06-23
 updated: 2026-06-23
-summary: Cihazlar tek tek güncellenir; eşzamanlı değil — sistem kilitlenmesini önler.
-links: [20260623-rf-uid-identity]      # [[wikilink]] de desteklenir
+summary: Devices are updated one by one; non-concurrent — prevents system lockup.
+links: [20260623-rf-uid-identity]      # [[wikilink]] supported
 ---
 
-Sıralı güncelleme: id1 biter, id2 başlar. Avantaj: tüm cihazlar aynı anda
-bootloader'a düşmez, sistem ayakta kalır...
+Sequential update: id1 completes, id2 starts. Advantage: all devices do not drop to bootloader simultaneously...
 ```
 
-- `summary` zorunlu ve **kısa** → index/MOC bunu gösterir, gövdeyi değil. Token disiplini buradan gelir.
-- `type` retrieval filtresini sağlar (teknik görevde `daily` notları boğmaz).
-- `links` ilişki grafiğini kurar (MOC + backlink + AI traversal).
+- `summary` is required and **short** → index/MOC displays this, not the body. Enables token discipline.
+- `type` provides retrieval filtering (keeps `daily` notes from clogging technical queries).
+- `links` builds relationship graph (MOC + backlink + AI traversal).
 
 ---
 
 ## 6. MOC (Map of Content)
 
-`_moc.md` = bir projenin/konunun **haritası**. Atomiklere link + tek satır özet.
+`_moc.md` = **map** of a project or topic. Links to atomic notes + single-line summary.
 
 ```markdown
 ---
@@ -132,163 +130,140 @@ project: stm32-rf-ota
 ---
 # STM32 RF OTA
 
-## Kararlar
-- [[20260623-rf-uid-identity]] — kimlik = 96-bit STM32 UID, hash yok
-- [[20260623-rf-uid-sequential]] — güncelleme sıralı, eşzamanlı değil
+## Decisions
+- [[20260623-rf-uid-identity]] — identity = 96-bit STM32 UID, no hash
+- [[20260623-rf-uid-sequential]] — updates sequential, non-concurrent
 
-## Bileşenler
+## Components
 - Sender STM32 (RF gateway), PC Uploader (Python/Qt), MobileUploader (Flutter)
-- Alıcılar: stpm, stpm_fc (bootloader) + app'leri
+- Receivers: stpm, stpm_fc (bootloader) + apps
 
-## Açık işler
-- [ ] DISCOVER_ACK 7→18 byte (UID) geçişi
+## Open Tasks
+- [ ] DISCOVER_ACK 7→18 byte (UID) transition
 ```
 
-Recall akışı: **MOC önce yüklenir** → AI ilgili linki görür → sadece o atomik notu `get` ile açar. Vault 10.000 nota çıksa bile bir görev = 1 MOC + birkaç atomik.
+Recall flow: **MOC loaded first** → AI sees relevant link → opens only that atomic note with `get`. Even if vault grows to 10,000 notes, one task = 1 MOC + a few atomic notes.
 
 ---
 
-## 7. Index Katmanı
+## 7. Index Layer
 
-- **Store:** vault markdown. **Index:** `.mnemo/index.sqlite` (atılabilir).
-- **Lexical:** SQLite **FTS5** (keyword/tag araması, deterministik, model gerektirmez).
-- **Semantic:** lokal embedding (sentence-transformers) → `sqlite-vec` ile vektör araması (paraphrase/eşanlam yakalar).
-- **Hybrid:** FTS5 + vektör sonuçları birleştirilir (rerank).
-- **Incremental:** dosya başına mtime/hash → sadece değişeni yeniden parse+embed. Tüm vault'u her seferinde işleme yok.
-- **Embedding lokal:** API yok, offline, gizli. (API opsiyonel eklenebilir.)
+- **Store:** vault markdown. **Index:** `.mnemo/index.sqlite` (disposable).
+- **Lexical:** SQLite **FTS5** (keyword/tag search, deterministic, no model required).
+- **Semantic:** local embedding (sentence-transformers/fastembed) → vector search via `sqlite-vec` (catches paraphrases/synonyms).
+- **Hybrid:** FTS5 + vector results fused (rerank via RRF).
+- **Incremental:** per-file mtime/hash → re-parse+embed only modified files. No full vault reprocessing.
+- **Local Embedding:** no API calls, offline, private.
 
 ---
 
-## 8. Retrieval (token disiplini)
+## 8. Retrieval (Token Discipline)
 
-`search` **özet + path + skor** döndürür, **tam gövde değil.** Map-then-expand sözleşme seviyesinde gömülü.
+`search` returns **summary + path + score**, **not full body.** Map-then-expand contract embedded at interface level.
 
 ```
-search("rf güncelleme sırası", type=decision, k=5)
-  → [{id, title, summary, path, score}, ...]   # ~5 satır, ucuz
-get(path)                                        # sadece gerekirse tam gövde
+search("rf update sequence", type=decision, k=5)
+  → [{id, title, summary, path, score}, ...]   # ~5 lines, cheap
+get(path)                                        # full body only if needed
 ```
 
-Böylece bilgi büyüdükçe görev başına token **sabit** kalır.
+Context token cost remains **flat** per task as vault grows.
 
 ---
 
 ## 9. MCP Tool API
 
-| Tool | Girdi | Çıktı | Not |
+| Tool | Input | Output | Note |
 |---|---|---|---|
-| `memory_search` | query, type?, project?, tags?, k=5 | özet+path+skor listesi | gövde DÖNMEZ |
-| `memory_get` | path/id | tam not | on-demand |
-| `memory_moc` | project | proje haritası | "harita" |
-| `memory_write` | type, title, body, tags, links | yeni/güncellenmiş not | **yazmadan-önce-ara** (dedup) |
-| `memory_link` | id_a, id_b | — | düğümleri bağla |
-
-Notlar MCP **resource** olarak da sunulabilir (opsiyonel).
+| `memory_search` | query, type?, project?, tags?, k=5 | summary+path+score list | does NOT return body |
+| `memory_get` | path/id | full note | on-demand |
+| `memory_moc` | project | project map | map |
+| `memory_write` | type, title, body, tags, links | new/updated note | **search-before-write** (dedup) |
+| `memory_link` | id_a, id_b | — | connect nodes |
 
 ---
 
-## 10. CLI Komutları
+## 10. CLI Commands
 
-| Komut | İş |
+| Command | Action |
 |---|---|
-| `mnemo init [--remote <github-url>]` | vault'u (git reposu olarak) kur |
-| `mnemo reindex` | index'i sıfırdan kur (taşıma sonrası) |
-| `mnemo search <query> [--type --project -k]` | hook/manuel arama |
-| `mnemo write ...` | not ekle (dedup'lı) |
-| `mnemo recall [--project]` | oturum-başı enjeksiyon bloğu üret (hook bunu basar) |
+| `mnemo init [--remote <github-url>]` | initialize vault as git repo |
+| `mnemo reindex` | rebuild index from scratch |
+| `mnemo search <query> [--type --project -k]` | hook/manual search |
+| `mnemo write ...` | add note (deduped) |
+| `mnemo recall [--project]` | generate session-start injection block (used by hook) |
 | `mnemo sync` | git pull + push |
-| `mnemo clone <github-url>` | yeni makine: klonla + reindex |
-| `mnemo export <file>` / `import <file>` | tek-parça taşıma (Drive vb.) |
-| `mnemo compact` | dedup/çürüme temizliği |
+| `mnemo clone <github-url>` | new machine: clone + reindex |
+| `mnemo export <file>` / `import <file>` | single-file transfer |
+| `mnemo compact` | dedup / decay cleanup |
 
 ---
 
-## 11. Hook Akışı (Claude Code — PUSH)
+## 11. Hook Flow (Claude Code — PUSH)
 
-Auto-recall'ı mümkün kılan kısım. `settings.json` hook'ları:
+Enables auto-recall. `settings.json` hooks:
 
-- **SessionStart:** `mnemo recall --project <cwd>` → ilgili MOC + son kararlar/dersler context'e enjekte edilir. AI **sormadan** geçmişi bilerek başlar.
-- **UserPromptSubmit (opsiyonel):** prompt'tan keyword/embedding → top-N not enjekte (göreve özel recall).
-- **Stop / SessionEnd:** oturumdan karar/hata/yapılanı çıkar → `mnemo write` (auto-capture, v3).
-
-> Bu, claude-mem'in çözemediği "okuma döngüsü"nü kapatır.
+- **SessionStart:** `mnemo recall --project <cwd>` → relevant MOC + recent decisions/lessons injected into context. AI starts knowing history **without asking**.
+- **UserPromptSubmit (optional):** keyword/embedding from prompt → top-N notes injected (task-specific recall).
+- **Stop / SessionEnd:** extract decision/bug/action from session → `mnemo write` (auto-capture).
 
 ---
 
 ## 12. Cross-AI
 
-- **MCP-uyumlu** (Claude Code, Cursor, ...): aynı MCP server'a bağlanır → aynı arama/recall.
-- **MCP-suz** (düz ChatGPT web vb.): MCP kullanamaz → ya `mnemo export` ile parça yapıştırma, ya vault'u elle okutma. Dürüst sınır.
-- Store evrensel (markdown), retrieval-wiring araç-başına.
+- **MCP-compatible** (Claude Code, Cursor, ...): connect to same MCP server → identical search/recall.
+- **Non-MCP** (plain ChatGPT web, etc.): paste export or manually load vault.
+- Store is universal (markdown), retrieval wiring per tool.
 
 ---
 
-## 13. Taşınabilirlik — GitHub omurgası
+## 13. Portability — GitHub Backbone
 
-- **Vault = private GitHub reposu.** Sadece markdown commit'lenir; `index.sqlite` + embedding cache `.gitignore`.
-- **Yeni makine / yeni AI:** `mnemo clone <github-url>` → klonla + reindex → her şeyi bilerek gelir. ("Hafızayı çek.")
-- **Avantaj:** versiyonlu bilgi (ne zaman öğrendim/değiştirdim), bedava sync, merge, yedek.
-- **Drive/Dropbox:** opsiyonel; vault düz klasör olduğu için çalışır ama versiyon/merge vermez. `export/import` tek-parça taşıma için.
-- Atomik notlar → git merge çakışması minimum.
+- **Vault = private GitHub repo.** Only markdown committed; `index.sqlite` + embedding cache `.gitignore`d.
+- **New machine / AI:** `mnemo clone <github-url>` → clone + reindex → starts fully informed.
+- **Advantages:** versioned knowledge, free sync, merge, backup.
 
 ---
 
-## 14. Çürüme Önleme (claude-mem'in ölüm sebebi)
+## 14. Decay Prevention
 
-- **Yazmadan-önce-ara:** `write` önce benzer not arar; varsa yeni açmaz → günceller/ekler.
-- **`compact`:** periyodik dedup + ölü link temizliği.
-- **summary zorunlu:** her not özetlenebilir olmalı; özetlenemeyen not = kötü not.
-
----
-
-## 15. Gizlilik / Güvenlik
-
-- **İki repo, karıştırma:**
-  - **PUBLIC** (OSS): `mnemo` yazılımı. Generic, vault-path config, kişisel veri YOK.
-  - **PRIVATE**: kullanıcının vault'u (notlar, kararlar, hatalar).
-- Araç remote'un **public** göründüğünü sezerse uyarır (notların yanlışlıkla yayınlanmasını önle).
-- Lokal embedding → veri makineden çıkmaz (API opsiyonel ve açıkça opt-in).
+- **Search-before-write:** `write` checks for existing similar notes before adding new ones → updates/appends instead.
+- **`compact`:** periodic dedup + dead link cleanup.
+- **Required summary:** every note must be summarizable.
 
 ---
 
-## 16. Teknoloji
+## 15. Privacy / Security
 
-- **Dil:** Python. Dağıtım: `uvx` (npx kadar kolay).
-- **Bağımlılıklar:** `mcp` (SDK), `python-frontmatter`, `sentence-transformers`, `sqlite-vec`, SQLite FTS5 (stdlib).
-- **Store:** vault markdown + `.mnemo/index.sqlite` (sidecar, atılabilir).
+- **Two repos:**
+  - **PUBLIC** (OSS): `mnemo` software. Generic, vault-path config, NO personal data.
+  - **PRIVATE**: user's vault (notes, decisions, bugs).
+- Local embedding → data never leaves the machine.
 
 ---
 
-## 17. İnşa Yol Haritası (bağımlılık sırası — hepsi tam sürümde)
+## 16. Stack
 
-| Faz | Çıktı | Kanıt | Durum |
+- **Language:** Python. Distribution: `uvx` / `pipx`.
+- **Dependencies:** `mcp` (SDK), `python-frontmatter`, `sentence-transformers` / `fastembed`, `sqlite-vec`, SQLite FTS5.
+- **Store:** vault markdown + `.mnemo/index.sqlite` (sidecar, disposable).
+
+---
+
+## 17. Roadmap
+
+| Phase | Output | Proof | Status |
 |---|---|---|---|
-| **F1 — Çekirdek** | parse + frontmatter + FTS5 + incremental index | `search` doğru notu döndürür | ✅ |
-| **F2 — CLI + Hook** | `recall/search/write` + Claude SessionStart hook (push) | AI sormadan geçmişi bilerek başlar | ✅ |
-| **F3 — MCP** | `memory_search/get/moc/write` server | Cursor/Claude aynı vault'ta arar | ✅ |
-| **F4 — Taşıma** | `init/sync/clone/export/import` (GitHub) | yeni makinede klonla+reindex çalışır | ✅ |
-| **F5 — Semantic + daily** | fastembed+sqlite-vec hybrid (RRF), içerik dedup, `daily` journaling | paraphrase araması FTS'in kaçırdığını bulur | ✅ |
-
-F2 sonunda **okuma döngüsü kapandı** → claude-mem'i geçer. 24 test geçiyor.
-
-**Embedding backend kararı (çözüldü):** fastembed (ONNX) + `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (384-dim, çok-dilli, Türkçe). torch yok → hafif/hızlı cold-start. SessionStart hook (`recall`) embedding YÜKLEMEZ (sadece SQL) → hızlı kalır; model yalnız `search/serve/write/reindex`'te lazy yüklenir.
-
-**Sonraki (F5+ / opsiyonel):** transcript'ten otomatik yakalama (rot riski yüksek — bilerek ertelendi; şimdilik recall footer modeli `memory_write`'a yönlendiriyor), `compact` (dedup/ölü-link temizliği), MOC yarı-otomatik üretimi.
+| **F1 — Core** | parse + frontmatter + FTS5 + incremental index | `search` returns correct note | ✅ |
+| **F2 — CLI + Hook** | `recall/search/write` + Claude SessionStart hook (push) | AI starts knowing history without asking | ✅ |
+| **F3 — MCP** | `memory_search/get/moc/write` server | Cursor/Claude search same vault | ✅ |
+| **F4 — Portability** | `init/sync/clone/export/import` (GitHub) | clone+reindex works on new machine | ✅ |
+| **F5 — Semantic + daily** | fastembed+sqlite-vec hybrid (RRF), content dedup, `daily` journaling | paraphrase search finds what FTS misses | ✅ |
 
 ---
 
-## 18. Kararlar + Açık Sorular
+## 18. Decisions
 
-### Verilen kararlar (2026-06-23)
-1. **Embedding modeli:** hız + kararlılık öncelik. Notlar **Türkçe** → çok-dilli MiniLM (`paraphrase-multilingual-MiniLM-L12-v2`) varsayılan. FTS5 keyword zaten dilden bağımsız; embedding katmanı çok-dilli.
-2. **Proje tespiti:** **git remote slug → yoksa klasör adı** fallback.
-3. **İsim:** `mnemo` kalır.
-
-### Açık (sonra)
-- **Auto-capture tetiği:** her oturum sonu mu, commit'te mi, manuel onaylı mı? (F5)
-- **MOC üretimi:** elle mi, yarı-otomatik mi (atomiklerden link toplama)? (F3+)
-- **Embedding backend:** sentence-transformers (torch, ağır) vs ONNX/fastembed (hızlı cold-start — hook için önemli). F1'de modül pluggable; dağıtımda ONNX'e geçiş değerlendirilecek.
-
----
-
-> Sonraki adım: bu DESIGN onaylanınca → public repo iskeleti + `pyproject.toml` + F1 çekirdek.
+1. **Embedding Model:** Multilingual MiniLM (`paraphrase-multilingual-MiniLM-L12-v2`) default.
+2. **Project Detection:** git remote slug → folder name fallback.
+3. **Name:** `mnemo`.
