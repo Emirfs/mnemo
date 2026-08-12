@@ -276,7 +276,7 @@ token discipline comes from. (No `summary` = bad note. The fish judges you. 🐠
 
 ## 📊 Status
 
-Working. **F1–F6 shipped, test suite green.** ✅ See [`DESIGN.md`](./DESIGN.md) for
+Working. **F1–F6 shipped, test suite green.** ✅ See [`DESIGN.md`](./docs/DESIGN.md) for
 architecture and roadmap.
 
 - **F1** — core: markdown/frontmatter parse, FTS5, incremental index
