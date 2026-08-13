@@ -1,327 +1,275 @@
-# Mnemo Live — Sistem Planı
+# Mnemo Live — System Plan
 
-> AI-native bir terminal ve onun **kalıcı, otomatik hafızası**. Hafıza katmanı
-> mevcut **mnemo** vault'u; üstüne yerel (ücretsiz) bir model ile çalışan bir
-> **broker** ekliyoruz. Sonuç: terminalde iş yaparken hafıza, kararlar ve
-> yapılacaklar manuel `recall` çağırmadan, otomatik olarak kullandığın AI'a akar.
+> An AI-native terminal and its **persistent, automatic memory**. The memory layer
+> is the existing **mnemo** vault; on top of it we add a **broker** running with a local
+> (free) model/process. Result: while working in the terminal, memory, decisions, and
+> tasks flow automatically to the AI you use without calling manual `recall`.
 
-Tarih: 2026-06-23 · Durum: plan (onay bekliyor) · Sahip: Emir Furkan
-
----
-
-## 1. Yönetici özeti
-
-Bir terminal yazmak işin küçük ve son kısmı. Asıl değer ve asıl iş, **araya
-giren hafıza broker'ı**: sen ne yazarsan, arka planda ilgili hafızayı seçip
-sıkıştırıp kullandığın AI'a ekleyen sürekli açık bir katman. Bu katman zaten var
-olan mnemo vault'unu (markdown + sqlite index + MCP + recall hook) okur.
-
-Kritik tasarım kararı: **hiç LLM yok — ne sıcak yolda, ne arka planda.** Her
-prompt'ta yapılan iş saf *retrieval* (sqlite FTS + embedding), ~deci-saniye.
-Hafıza kalitesi (tazelik, çelişki çözme, eskime) LLM'siz, **mekanik** kurallarla
-sağlanır. Böylece sistem hem hızlı hem hafif, hem de bağımlılıksız.
-
-> **Güncelleme (2026-06-25):** Ollama/yerel-LLM "Librarian" planı **düştü.**
-> supermemory karşılaştırması (bkz. §14) sonrası, bizde eksik olan retrieval
-> kalitesi parçaları LLM gerektirmeden eklendi: eval harness, recency ağırlığı,
-> profile tipi, temporal supersession, ephemeral expire. Hepsi shipped (§10).
-
-Bu plan fazlarda ilerler. Faz 0 bir terminal yazmadan "otomatik hafıza" tezini
-kanıtlar; terminal en sona, hazır açık-kaynak bir tabanı çatallayarak gelir.
+Date: 2026-06-23 · Status: Plan (Pending approval) · Owner: Emir Furkan
 
 ---
 
-## 2. Vizyon (senin istediğin, damıtılmış)
+## 1. Executive Summary
 
-- Warp/Wave gibi modern, AI-native bir terminal.
-- Terminalin **kendi hafızası = mnemo sistemi**.
-- O terminalde iş yaparken **`recall` gibi manuel adımlara gerek kalmasın**.
-- Terminale bağlı **ücretsiz/yerel bir model** (Ollama), hafızayı ve yapılacak
-  işleri özetleyip o an kullandığın AI'a otomatik iletsin.
-- Yavaş olmasın, RAM'i şişirmesin.
+Building a terminal is the minor and final part of the job. The real value and main work is the **intermediary memory broker**: whatever you type, a constantly running layer in the background selects, compresses, and injects the relevant memory into the AI you use. This layer reads the existing mnemo vault (markdown + sqlite index + MCP + recall hook).
+
+Critical design decision: **zero LLMs — neither on the hot path nor in the background.** Everything per prompt is pure *retrieval* (sqlite FTS + embedding), ~deci-seconds. Memory quality (recency, conflict resolution, expiration) is handled via **mechanical** rules without an LLM. Thus the system remains fast, lightweight, and dependency-free.
+
+> **Update (2026-06-25):** The Ollama/local-LLM "Librarian" plan was **dropped.**
+> Following the supermemory comparison (see §14), the missing retrieval quality components were added without requiring an LLM: eval harness, recency weight, profile type, temporal supersession, ephemeral expire. All shipped (§10).
+
+This plan progresses in phases. Phase 0 proves the "automatic memory" thesis without building a terminal; the terminal comes last by forking an existing open-source base.
 
 ---
 
-## 3. Temel ilke: ürün hafızadır, ön yüz takılıp çıkarılır
+## 2. Vision (Distilled)
+
+- A modern, AI-native terminal like Warp/Wave.
+- Terminal's **own memory = mnemo system**.
+- **No manual steps like `recall`** needed while working in that terminal.
+- A **free/local daemon** connected to the terminal automatically passes summarized memory and upcoming tasks to the active AI.
+- Fast, low RAM footprint.
+
+---
+
+## 3. Core Principle: Product is Memory, Front-End is Pluggable
 
 ```
        ┌─────────────────────────────────────────────┐
-       │  ÖN YÜZLER (değiştirilebilir, ucuz)          │
+       │  FRONT-ENDS (interchangeable, lightweight)  │
        │  Claude Code · Cursor · Mnemo Term · TUI     │
        └───────────────┬─────────────────────────────┘
-                       │  (MCP / hook / stdin enjeksiyon)
+                       │  (MCP / hook / stdin injection)
        ┌───────────────▼─────────────────────────────┐
-       │  BROKER  (Mnemo Live — sürekli açık, sıcak)  │  ← asıl yeni iş
-       │  • retrieval (FTS + embedding)  ← sıcak yol  │
-       │  • bağlam paketleyici (token bütçeli)        │
-       │  • task/karar yüzeye çıkarıcı                │
+       │  BROKER  (Mnemo Live — always-on, hot)      │  ← new main component
+       │  • retrieval (FTS + embedding)  ← hot path   │
+       │  • context packager (token budgeted)        │
+       │  • task/decision surfacer                    │
        └───────────────┬─────────────────────────────┘
                        │
        ┌───────────────▼─────────────────────────────┐
-       │  ÇEKİRDEK  (mnemo — VAR)                     │
+       │  CORE  (mnemo — EXISTING)                    │
        │  vault (markdown)  +  index (sqlite/vec)     │
-       │  + kalite (mekanik, LLM'siz):                │
+       │  + quality (mechanical, no LLM):             │
        │    recency · supersession · expire · profile │
        └─────────────────────────────────────────────┘
 ```
 
-> Eski plandaki **LIBRARIAN (Ollama)** kutusu kaldırıldı. Onun çözeceği iş
-> (yeni-eskiyi-geçersiz-kılar, eskime) mekanik kurallarla, LLM olmadan yapılıyor.
+> The **LIBRARIAN (Ollama)** box from the old plan was removed. Its responsibilities (superseding old notes, expiration) are handled mechanically without an LLM.
 
-Ana fikir: AI'ları yeniden yazmıyoruz. Onlar ön yüz; çekirdek hafızaya
-**MCP** ve **hook** ile bağlanırlar. Terminal de sadece bir ön yüz — bu yüzden
-en sona bırakılabilir ve hazır bir tabandan türetilir.
+Main idea: We don't rewrite AIs. They are front-ends; they connect to core memory via **MCP** and **hooks**. The terminal is also just a front-end — which is why it can be deferred to the end and derived from an existing base.
 
 ---
 
-## 4. Bileşenler
+## 4. Components
 
-### 4.1 Çekirdek — mnemo (VAR)
-- **Vault:** `C:/Users/Emir Furkan/Desktop/mnemo-vault` — Obsidian uyumlu
-  markdown. Tipler: `project (MOC) · decision · lesson · reference · daily · note`.
-- **Index:** `.mnemo/index.sqlite` (FTS + opsiyonel `sqlite-vec` embedding).
-- **Okuma yolları:** MCP server (`memory_search/get/moc/write`) ve SessionStart
-  recall hook. İkisi de aynı vault'u okur.
-- **Proje tespiti:** git remote slug → klasör adı (örn. `stm32-rf-ota`).
+### 4.1 Core — mnemo (EXISTING)
+- **Vault:** `C:/Users/Emir Furkan/Desktop/mnemo-vault` — Obsidian-compatible markdown. Types: `project (MOC) · decision · lesson · reference · daily · note`.
+- **Index:** `.mnemo/index.sqlite` (FTS + optional `sqlite-vec` embedding).
+- **Read paths:** MCP server (`memory_search/get/moc/write`) and SessionStart recall hook. Both read the same vault.
+- **Project detection:** git remote slug → folder name (e.g., `stm32-rf-ota`).
 
-### 4.2 Broker — "Mnemo Live" (YENİ, kalbi bu)
-Sürekli açık tek bir process. İçinde embedding modeli **bir kez** yüklenir ve
-sıcak kalır (soğuk subprocess başlatma yok). Görevleri:
+### 4.2 Broker — "Mnemo Live" (NEW, the heart)
+A single always-on process. The embedding model is loaded **once** and kept warm (no cold subprocess launches). Tasks:
 
-1. **Retrieval:** gelen prompt/komut + cwd/proje bağlamına göre vault'tan en
-   ilgili notları seçer. Saf sqlite FTS + cosine. LLM yok.
-2. **Bağlam paketleme:** seçilen notları sert token bütçesine (örn. ≤800 token)
-   sıkıştırır; her not zaten "summary-only" tutulduğu için ucuz.
-3. **Task/karar yüzeyleme:** açık task'ları ve son kararları "sırada ne var"
-   olarak ekler.
-4. **Cache:** cwd/proje/task değişmediyse son paketi yeniden kullanır.
+1. **Retrieval:** Selects the most relevant notes from the vault based on incoming prompt/command + cwd/project context. Pure sqlite FTS + cosine. No LLM.
+2. **Context Packaging:** Compresses selected notes into a hard token budget (e.g., ≤800 tokens); cheap because notes are kept "summary-only".
+3. **Task/Decision Surfacing:** Adds open tasks and recent decisions as "what's next".
+4. **Cache:** Reuses the previous package if cwd/project/task haven't changed.
 
-Arayüz: yerel bir soket/HTTP endpoint (`localhost`), ör. `GET /context?cwd=...`.
-Ön yüzler buradan ister; daemon sıcak olduğu için cevap ~ms.
+Interface: Local socket/HTTP endpoint (`localhost`), e.g., `GET /context?cwd=...`.
+Front-ends request from here; response is ~ms because the daemon is warm.
 
-### 4.3 Enjeksiyon (YENİ)
-"Manuel recall'a gerek kalmasın" kısmı. İki mod:
-- **Claude Code / MCP'li AI'lar:** `UserPromptSubmit` hook → broker'dan bağlam
-  çek → prompt'un başına ekle. Her mesajda taze bağlam (session başında tek sefer
-  değil).
-- **Terminale gömülü chat (Faz 3):** prompt'u zaten biz kuruyoruz → bağlamı
-  doğrudan system prompt'a koyarız.
+### 4.3 Injection (NEW)
+The "no manual recall needed" part. Two modes:
+- **Claude Code / MCP AIs:** `UserPromptSubmit` hook → fetch context from broker → prepend to prompt. Fresh context per message (not just once at session start).
+- **Terminal embedded chat (Phase 3):** We build the prompt ourselves → context placed directly in system prompt.
 
-### 4.4 Kalite katmanı — mekanik, LLM'siz (YENİ, shipped)
-Eski "Librarian (Ollama)" planının yerine geçer. supermemory'nin LLM ile yaptığı
-fact-yönetimini, biz markdown + sqlite üstünde **kural tabanlı** yapıyoruz —
-hiç model yüklemeden, sıcak yola dokunmadan:
+### 4.4 Quality Layer — Mechanical, No LLM (NEW, shipped)
+Replaces the old "Librarian (Ollama)" plan. Fact management done in supermemory via LLM is implemented here using **rule-based logic** over markdown + sqlite — zero model loading, touching nothing on the hot path:
 
-- **Recency ağırlığı** (`context.py`): ilgililik skoru tazelikle çarpılır
-  (yarı-ömür 120 gün, taban 0.5). Aynı derecede ilgili iki nottan yeni olan öne
-  çıkar; eski demote olur. Saf tarih matematiği, ms.
-- **Temporal supersession** (`note.py` + `writer.py`): `mnemo write
-  --supersedes <id,…>` yeni notu yazar, eskileri `status: superseded` +
-  `superseded_by` ile işaretler. Eski not diskte kalır (tarihçe) ama retrieval'dan
-  düşer → "yeni eskiyi geçersiz kılar".
-- **Ephemeral expire** (`context.py`): `note`/`daily` tipleri raf ömrünü (90 gün)
-  aşınca context paketinden çıkar; vault'ta ve `search`'te durur.
-- **Profile tipi** (`note.py`): kullanıcı/stack hakkında statik gerçekler. Sorgu
-  bağımsız, her context/recall paketinin başına sabitlenir.
-- **Eval harness** (`bench.py` + `mnemo bench`): hit-rate / MRR / mean-recall.
-  Her kalite değişikliğini ölç-doğrula.
+- **Recency weight** (`context.py`): Relevance score is multiplied by freshness (half-life 120 days, base 0.5). Between two equally relevant notes, the newer one ranks higher; the older one is demoted. Pure date math, ms.
+- **Temporal supersession** (`note.py` + `writer.py`): `mnemo write --supersedes <id,...>` writes new note and marks older ones with `status: superseded` + `superseded_by`. Old notes stay on disk (history) but drop from retrieval → "new invalidates old".
+- **Ephemeral expire** (`context.py`): `note`/`daily` types drop from context package when exceeding shelf life (90 days); retained in vault and `search`.
+- **Profile type** (`note.py`): Static facts about user/stack. Query-agnostic, pinned to top of every context/recall package.
+- **Eval harness** (`bench.py` + `mnemo bench`): hit-rate / MRR / mean-recall. Measure and verify every quality change.
 
-İleride LLM distill istenirse Faz 2 olarak geri eklenebilir; şimdilik kapsam dışı.
+If LLM distillation is desired later, it can be added back as Phase 2; currently out of scope.
 
-### 4.5 Ön yüz / Terminal (EN SON)
-Sıfırdan terminal **yazılmaz**. Hazır açık tabanı çatalla:
-- **Wave Terminal** (açık kaynak, AI-native) — en yakın hazır temel.
-- **Tauri + xterm.js** — tam kontrol, orta efor.
-- **Ghostty / TUI** — hafif alternatif.
-Broker'a `localhost` üzerinden bağlanır; mnemo eklenti olur.
+### 4.5 Front-End / Terminal (LAST)
+Do **not** write a terminal from scratch. Fork an existing open base:
+- **Wave Terminal** (open-source, AI-native) — closest existing foundation.
+- **Tauri + xterm.js** — full control, moderate effort.
+- **Ghostty / TUI** — lightweight alternative.
+Connects to broker over `localhost`; mnemo acts as an extension.
 
 ---
 
-## 5. Veri akışı
+## 5. Data Flow
 
-**Okuma yolu (sıcak, her prompt) — hedef <100ms:**
+**Read Path (hot, every prompt) — target <100ms:**
 ```
-sen yazarsın
-  → enjeksiyon (hook/terminal) broker'a sorar: /context?cwd=…&q=…
-  → broker: query embed (sıcak) + sqlite FTS/vektör → top-k not
-  → token bütçesine paketle → döndür
-  → AI prompt'una eklenir → AI cevaplar
+user types
+  → injection (hook/terminal) queries broker: /context?cwd=…&q=…
+  → broker: query embed (warm) + sqlite FTS/vector → top-k notes
+  → package to token budget → return
+  → prepended to AI prompt → AI answers
 ```
-LLM çağrısı YOK.
+ZERO LLM calls.
 
-**Yazma yolu (soğuk, nadir, arka plan):**
+**Write Path (cold, rare, background):**
 ```
-session biter / not değişir
-  → librarian iş kuyruğuna eklenir (debounce)
-  → Ollama yüklenir → distill/özet/link → draft not yaz → index güncelle
-  → Ollama keep_alive sonunda boşalır
+session ends / note changes
+  → added to librarian queue (debounced)
+  → Ollama loads → distill/summary/link → write draft note → update index
+  → Ollama unloads after keep_alive
 ```
-Sen beklemezsin.
+User never waits.
 
 ---
 
-## 6. Performans tasarımı
+## 6. Performance Design
 
-| İş | Süre | Yol |
+| Task | Time | Path |
 |---|---|---|
-| FTS sorgu | ~1–5ms | sıcak |
-| query embed (model RAM'de) | ~10–30ms | sıcak |
-| vektör arama (yüzlerce not) | ~1–5ms | sıcak |
-| paketleme | ~1ms | sıcak |
-| **sıcak yol toplam** | **<50ms** | her prompt |
-| soğuk spawn + model yükle | 1–3sn | **kaçınılan** |
-| distill/özet (Ollama 3B) | birkaç sn | arka plan |
+| FTS query | ~1–5ms | hot |
+| query embed (model in RAM) | ~10–30ms | hot |
+| vector search (hundreds of notes) | ~1–5ms | hot |
+| packaging | ~1ms | hot |
+| **hot path total** | **<50ms** | per prompt |
+| cold spawn + model load | 1–3s | **avoided** |
+| distill/summary (Ollama 3B) | several seconds | background |
 
-Yavaşlığın tek kaynağı soğuk başlatma. Çözüm: **resident sıcak daemon** —
-model bir kez yüklenir, sonraki her sorgu sıcak.
+Sole source of slowness is cold start. Solution: **resident hot daemon** — model loaded once, all subsequent queries hot.
 
 ---
 
-## 7. Kaynak (RAM) tasarımı
+## 7. Resource (RAM) Design
 
-| Bileşen | RAM | Sürekli? |
+| Component | RAM | Continuous? |
 |---|---|---|
-| broker process | ~30–50MB | evet |
-| embedding modeli (bge-small ONNX) | ~150–250MB | evet (küçük) |
-| sqlite index | birkaç MB (mmap) | evet |
-| **broker toplam** | **~250MB** | bir tarayıcı sekmesi |
-| Ollama küçük model (3B) | 2–3GB | **HAYIR — sadece distill anında** |
+| broker process | ~30–50MB | yes |
+| embedding model (bge-small ONNX) | ~150–250MB | yes (small) |
+| sqlite index | a few MB (mmap) | yes |
+| **broker total** | **~250MB** | one browser tab |
+| Ollama small model (3B) | 2–3GB | **NO — only during distillation** |
 
-Kademeler:
-- **Tier A (minimal, ~50MB):** embedder yok, saf FTS retrieval. Eski makinede bile rahat.
-- **Tier B (önerilen, ~250MB):** + resident embedder. İyi ilgililik.
-- **Tier C:** büyük reranker — RAM artar, kazanç az → **atla**.
+Tiers:
+- **Tier A (minimal, ~50MB):** No embedder, pure FTS retrieval. Comfortable even on legacy hardware.
+- **Tier B (recommended, ~250MB):** + resident embedder. Good relevance.
+- **Tier C:** Large reranker — RAM increases, marginal gain → **skip**.
 
-Kural: küçük embedder sıcak kalır, büyük LLM tembel/on-demand. Korkulan 4–8GB
-hiçbir zaman sürekli durmaz.
-
----
-
-## 8. "Recall'a gerek yok" deneyimi
-
-Önce: session başında bir kez recall bloğu; ortada ihtiyaç olursa manuel arama;
-MCP kayıtlı değilse hiç. (Bugünkü arıza tam buydu.)
-
-Sonra: her prompt'ta broker ilgili kararları/planı/task'ı sessizce ekler. Sen
-"şu UID planına göre devam et" dersin; broker `uid-goc-plani-tam`'ı zaten
-bağlama koymuştur. Distiller de yeni kararları arka planda nota çevirir →
-hafıza kendi kendini besler.
+Rule: Small embedder stays warm; large LLM stays lazy/on-demand. Dreaded 4–8GB never stays continuously resident.
 
 ---
 
-## 9. Teknoloji seçimleri ve gerekçe
+## 8. "No Recall Needed" Experience
 
-| Katman | Seçim | Neden |
+Before: Single recall block at session start; manual search if needed mid-session; none if MCP not registered. (Exactly today's pain point.)
+
+After: On every prompt, broker silently appends relevant decisions/plan/tasks. You say "continue according to that UID plan"; broker has already placed `uid-migration-plan-full` into context. Distiller turns new decisions into notes in the background → memory feeds itself.
+
+---
+
+## 9. Technology Choices and Rationale
+
+| Layer | Choice | Rationale |
 |---|---|---|
-| Çekirdek | mnemo (mevcut) | hazır, AI-agnostik, markdown taşınır |
-| Index | sqlite + FTS5 (+ sqlite-vec) | sıfır sunucu, hızlı, taşınır |
-| Embedding | fastembed / bge-small (ONNX) | yerel, hızlı, küçük RAM |
-| Kalite | mekanik kurallar (recency/supersede/expire) | LLM yok, ms, bağımlılıksız |
-| ~~Yerel LLM~~ | ~~Ollama~~ → **düştü** | mekanik kalite katmanı yeterli (§4.4) |
-| Broker | resident Python daemon + localhost API | model sıcak kalır, ön yüz bağımsız |
-| Enjeksiyon | Claude Code hook (UserPromptSubmit) | terminal yazmadan çalışır |
-| Terminal | Wave fork / Tauri+xterm.js | sıfırdan terminal yazma |
+| Core | mnemo (existing) | ready, AI-agnostic, portable markdown |
+| Index | sqlite + FTS5 (+ sqlite-vec) | zero server, fast, portable |
+| Embedding | fastembed / bge-small (ONNX) | local, fast, small RAM footprint |
+| Quality | mechanical rules (recency/supersede/expire) | no LLM, ms, dependency-free |
+| ~~Local LLM~~ | ~~Ollama~~ → **dropped** | mechanical quality layer sufficient (§4.4) |
+| Broker | resident Python daemon + localhost API | model stays warm, front-end independent |
+| Injection | Claude Code hook (UserPromptSubmit) | works without writing a terminal |
+| Terminal | Wave fork / Tauri+xterm.js | don't write terminal from scratch |
 
 ---
 
-## 10. Yol haritası (fazlar)
+## 10. Roadmap (Phases)
 
-### Faz 0 — Temizlik + `context` MVP · şimdi
-Broker'a geçmeden önce retrieval hipotezini ölç.
-- [x] `mnemo context <query>`: MOC + karar/ders/reference özetlerini token bütçesiyle paketle.
-- [ ] mnemo MCP server'ı kaydet (`claude mcp add --scope user`).
-- [ ] Tool'u yenile: bozuk `mnemofish` kalıntısını sil, repo'dan `0.2.1 + [mcp]` kur.
-- [x] `context` benchmark **harness** shipped: `mnemo bench <cases.json>` →
-  hit-rate / MRR / mean-recall (`bench.py`). Kalan: 10 gerçek prompt'luk cases dosyasını doldur.
-- **Kabul:** manuel arama yapmadan doğru UID/STPM bağlamı geliyor; gürültü ve token bütçesi ölçülüyor.
+### Phase 0 — Cleanup + `context` MVP · active
+Measure retrieval hypothesis before moving to broker.
+- [x] `mnemo context <query>`: Package MOC + decision/lesson/reference summaries within token budget.
+- [ ] Register mnemo MCP server (`claude mcp add --scope user`).
+- [ ] Refresh tool: clean broken `mnemofish` residue, install `0.2.1 + [mcp]` from repo.
+- [x] `context` benchmark **harness** shipped: `mnemo bench <cases.json>` → hit-rate / MRR / mean-recall (`bench.py`). Remaining: populate cases file with 10 real prompts.
+- **Acceptance:** Correct UID/STPM context arrives without manual search; noise and token budget measured.
 
-### Faz 0.5 — Kalite katmanı (supermemory-türevi) · ✅ shipped 2026-06-25
-supermemory karşılaştırmasından (§14) çıkan, bizde eksik retrieval kalitesi —
-hepsi LLM'siz, 40 test yeşil:
+### Phase 0.5 — Quality Layer (supermemory-derived) · ✅ shipped 2026-06-25
+Missing retrieval quality features identified from supermemory comparison (§14) — all without LLM, 40 tests green:
 - [x] **Eval harness** (`bench.py`, `mnemo bench`).
-- [x] **Recency ağırlığı** — context sıralaması tazelikle harmanlanır.
-- [x] **Profile tipi** — statik gerçekler her pakete sabitlenir.
+- [x] **Recency weighting** — context ranking blended with freshness.
+- [x] **Profile type** — static facts pinned to every package.
 - [x] **Temporal supersession** — `write --supersedes`, `status: superseded`.
-- [x] **Ephemeral expire** — eski `note`/`daily` context'ten düşer.
-- **Kabul:** baseline'a karşı hit-rate/MRR ölçülebilir; çelişen kararlar otomatik gizlenir.
+- [x] **Ephemeral expire** — old `note`/`daily` drop from context.
+- **Acceptance:** Hit-rate/MRR measurable against baseline; conflicting decisions hidden automatically.
 
-### Faz 1 — Enjeksiyon / broker kararı · sonra
-- [ ] `UserPromptSubmit` hook → önce `mnemo context` çıktısını her prompt'a ekle.
-- [ ] Eğer CLI soğuk başlangıcı rahatsız ederse resident broker daemon: `localhost /context`, sıcak embedder, Tier A→B.
-- **Kabul:** yeni Claude Code session'ında manuel recall'a gerek yok; daemon sadece ölçüm gerekiyorsa ekleniyor.
+### Phase 1 — Injection / Broker Decision · upcoming
+- [ ] `UserPromptSubmit` hook → prepend `mnemo context` output to every prompt.
+- [ ] If CLI cold start is noticeable, resident broker daemon: `localhost /context`, warm embedder, Tier A→B.
+- **Acceptance:** No manual recall needed in new Claude Code session; daemon added only if measurement requires it.
 
-### Faz 2 — Librarian (LLM yazma otomasyonu) · ❌ DÜŞTÜ (2026-06-25)
-Ollama distiller planı iptal. Çözeceği çekirdek iş (çelişki/eskime) Faz 0.5'te
-mekanik olarak çözüldü. Yalnız LLM gerektiren "session → otomatik karar distill"
-isteği geri gelirse yeniden değerlendirilir — şimdilik kapsam dışı.
+### Phase 2 — Librarian (LLM Writing Automation) · ❌ DROPPED (2026-06-25)
+Ollama distiller plan cancelled. Core problem (conflict/expiration) solved mechanically in Phase 0.5. Will reconsider only if LLM-only requirement "session → automatic decision distillation" re-emerges — currently out of scope.
 
-### Faz 3 — Terminal ön yüzü · en son
-- [ ] Wave fork / Tauri+xterm.js değerlendir, birini seç.
-- [ ] Broker'a bağla; proje/path seçici + hafıza dashboard.
-- [ ] Gömülü chat'e doğrudan bağlam enjeksiyonu.
-- **Kabul:** terminalde proje aç, AI otomatik hafızalı çalışıyor.
+### Phase 3 — Terminal Front-End · last
+- [ ] Evaluate Wave fork vs Tauri+xterm.js, choose one.
+- [ ] Connect to broker; project/path selector + memory dashboard.
+- [ ] Direct context injection into embedded chat.
+- **Acceptance:** Open project in terminal, AI operates with automated memory.
 
 ---
 
-## 11. Riskler ve önlemler
+## 11. Risks and Mitigations
 
-| Risk | Önlem |
+| Risk | Mitigation |
 |---|---|
-| Yerel model kötü not seçer → gürültü | ilgililik eşiği + sert token bütçesi; alakasızsa hiç enjekte etme |
-| Oto-distill yanlış karar üretir | `status: draft`; mekanik işler (link) otomatik, karar çıkarma onaylı |
-| Per-prompt latency | LLM sıcak yolda yok; resident sıcak embedder; cache |
-| RAM şişer | büyük LLM on-demand + keep_alive; Tier A fallback |
-| Terminal scope patlaması | sıfırdan yazma yok; hazır tabanı çatalla; en son faz |
-| Vault gizlilik (private repo) | mnemo zaten private git uyarısı veriyor; broker sadece localhost |
+| Local model picks bad notes → noise | Relevance threshold + hard token budget; don't inject if irrelevant |
+| Auto-distill generates wrong decision | `status: draft`; mechanical tasks (linking) auto, decision extraction approved |
+| Per-prompt latency | No LLM on hot path; resident warm embedder; cache |
+| RAM bloating | Large LLM on-demand + keep_alive; Tier A fallback |
+| Terminal scope explosion | No scratch builds; fork ready base; last phase |
+| Vault privacy (private repo) | mnemo already warns if private git missing; broker localhost only |
 
 ---
 
-## 12. Bugün ne VAR, ne YENİ (dürüst kapsam)
+## 12. What Exists Today vs What's New (Honest Scope)
 
-**Var:** vault, sqlite index, embedding alt yapısı (`Embedder`), MCP server
-(`serve`), recall hook, proje tespiti, FTS+vec arama, taşınabilirlik (git/zip),
-`context` paketi, **+ kalite katmanı** (bench / recency / profile / supersession
-/ expire — Faz 0.5, shipped).
+**Exists:** Vault, sqlite index, embedding infrastructure (`Embedder`), MCP server (`serve`), recall hook, project detection, FTS+vec search, portability (git/zip), `context` package, **+ quality layer** (bench / recency / profile / supersession / expire — Phase 0.5, shipped).
 
-**Yeni yazılacak:** resident broker daemon + localhost API, UserPromptSubmit
-enjeksiyon hook'u, terminal ön yüzü.
+**To be written:** Resident broker daemon + localhost API, UserPromptSubmit injection hook, terminal front-end.
 
-**Düşen:** Ollama librarian (LLM distill) — mekanik kalite katmanı yerine geçti.
+**Dropped:** Ollama librarian (LLM distill) — replaced by mechanical quality layer.
 
 ---
 
-## 13. Karar bekleyen noktalar
+## 13. Decision Points Pending
 
-1. **Başlangıç:** Faz 0'a şimdi başlayayım mı (önce 3 fix + broker iskeleti)?
-2. **Retrieval kademesi:** ~~Tier A mı Tier B mi?~~ → **KARAR: Tier B**
-   (resident embedder, ~250MB, iyi ilgililik). 2026-06-23.
-3. ~~**Librarian agresifliği**~~ → kapandı: LLM librarian düştü (§4.4, Faz 2).
-4. **Terminal tabanı:** Wave fork mu, Tauri+xterm.js mı? (Faz 3'te netleşir.)
+1. **Start:** Begin Phase 0 now (3 fixes + broker skeleton first)?
+2. **Retrieval Tier:** ~~Tier A or Tier B?~~ → **DECISION: Tier B** (resident embedder, ~250MB, good relevance). 2026-06-23.
+3. ~~**Librarian Aggressiveness**~~ → Closed: LLM librarian dropped (§4.4, Phase 2).
+4. **Terminal Base:** Wave fork or Tauri+xterm.js? (To be clarified in Phase 3.)
 
 ---
 
-## 14. supermemory karşılaştırması (neden evirdik)
+## 14. Supermemory Comparison (Why We Evolved)
 
-[supermemory](https://github.com/supermemoryai/supermemory) (27.5k★) olgun bir
-hafıza motoru. İkisini birlikte kullanmak yerine (çift yazım/drift riski), onun
-**iyi yaptığı ama bizde eksik** parçaları mnemo'nun kimliğine (markdown + push +
-local) uydurarak aldık. Almadıklarımız bilinçli kapsam-dışı.
+[supermemory](https://github.com/supermemoryai/supermemory) (27.5k★) is a mature memory engine. Instead of using both (dual-write/drift risk), we took what it **does well that we lacked** and adapted it to mnemo's identity (markdown + push + local). What we excluded was deliberate.
 
-| supermemory'de güçlü | mnemo'ya nasıl girdi | Durum |
+| Strong in supermemory | How it landed in mnemo | Status |
 |---|---|---|
-| Fact extraction + çelişki çözme (yeni eskiyi geçersiz kılar) | temporal supersession (`--supersedes`, `status`) | ✅ mekanik |
-| Auto-expire (alakasız bilgi düşer) | ephemeral expire (`note`/`daily` raf ömrü) | ✅ |
-| Profil (statik gerçekler ~50ms) | `profile` tipi, pakete sabit | ✅ |
-| Recency-aware retrieval | recency decay ağırlığı | ✅ |
+| Fact extraction + conflict resolution (new invalidates old) | temporal supersession (`--supersedes`, `status`) | ✅ mechanical |
+| Auto-expire (irrelevant info drops) | ephemeral expire (`note`/`daily` shelf life) | ✅ |
+| Profile (static facts ~50ms) | `profile` type, pinned to package | ✅ |
+| Recency-aware retrieval | recency decay weighting | ✅ |
 | Benchmark (LongMemEval #1) | `mnemo bench` eval harness | ✅ |
-| LLM ile distill | — | ❌ kapsam dışı (mekanik yeterli) |
-| Connectors (Gmail/Drive/Notion) | — | ❌ scope patlaması |
-| Multimodal (PDF/OCR/video) | — | ❌ kimliğimiz değil |
+| LLM distillation | — | ❌ out of scope (mechanical sufficient) |
+| Connectors (Gmail/Drive/Notion) | — | ❌ scope explosion |
+| Multimodal (PDF/OCR/video) | — | ❌ not our identity |
 
-Korunan ayrım: supermemory Postgres/binary store + LLM kullanır; biz onun
-*davranışını* aldık, **store'unu değil** — markdown tek kaynak, LLM sıfır.
+Preserved distinction: supermemory uses Postgres/binary store + LLM; we adopted its *behavior*, **not its store** — markdown single source of truth, zero LLMs.
 
 ---
 
-*Bu rapor konuşmadaki kararların damıtımıdır. Faz 0.5 (kalite katmanı) uygulandı;
-sıradaki karar broker daemon (Faz 1) mı, cases dosyası + benchmark mı.*
+*This report distills session decisions. Phase 0.5 (quality layer) applied; next decision is broker daemon (Phase 1) vs cases file + benchmark.*
