@@ -23,3 +23,7 @@ venv/
 # local-only content (not for the tool repo)
 marketing/
 notes/
+desktop.ini
+Thumbs.db
+.tmp.driveupload/
+.tmp.drivedownload/
