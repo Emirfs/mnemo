@@ -1,5 +1,6 @@
 # mnemo — proje haritasi
-Durum: AKTIF
+Durum: BEKLEMEDE — 2026-11-18'den beri ortak hafiza `~/GitHub/araclar/hafiza`
+kasasinda (MCP `hafiza`); bu arac yeni iste kullanilmiyor.
 Yigin: Python >= 3.10, hatchling ile paketlenir. PyPI adi `mnemofish`
 (surum 0.2.1, MIT). Dagitim: CLI + MCP sunucusu.
 
@@ -13,11 +14,11 @@ Iki yol vardir:
 Bu depo **aractir**; kisisel vault icerigi `../mnemo-vault` deposunda durur.
 
 ## SU AN
-Canli dosya: <DOLDURULACAK>
-Nerede kaldik: <DOLDURULACAK>
-Siradaki: - [ ] <DOLDURULACAK>
+Canli dosya: yok.
+Nerede kaldik: Ortak hafiza `hafiza` kasasina tasindi; mnemo bekletiliyor.
+Siradaki: - [ ] Arsivlenip arsivlenmeyecegine karar ver.
 
-Dal: `master`. Son commit 2026-09-03 (gitignore duzeni).
+Dal: `main`. Son commit tarihi icin `git log -1`.
 
 ## Calistirma
 | Komut | Ne yapar |
